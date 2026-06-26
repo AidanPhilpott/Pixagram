@@ -1,0 +1,9 @@
+# Normalize line endings for reproducible cross-platform (PC ↔ macOS) builds.
+* text=auto eol=lf
+
+# Binary assets — never normalize.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary

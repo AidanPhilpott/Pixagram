@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Frontend build output
+dist/
+
+# Rust / Tauri build output
+src-tauri/target/
+
+# Tauri-generated schemas (regenerated on build)
+src-tauri/gen/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Generated source icon (regenerated from app-icon.png via `tauri icon`)
+src-tauri/build-log.txt
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Env
+.env
+.env.local

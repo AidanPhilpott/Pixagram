@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions plus the file-open dialog used to import RAFs.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default", "dialog:allow-open"]
+}

@@ -5,10 +5,10 @@
 > dated entry to [PROGRESS.md](PROGRESS.md) for the running history, and add any
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
-**Last updated:** 2026-06-26
-**Current phase:** Phase 1 (Skeleton) — ran on real X-T5 RAFs; color bug fixed.
-Awaiting final human sign-off on the corrected preview.
-**Branch:** `master` · **Next tag:** `v0.1.0` (on Phase 1 sign-off)
+**Last updated:** 2026-06-26 (end of session 2)
+**Current phase:** Phase 1 (Skeleton) — fully functional end-to-end on real X-T5
+RAFs. **One open decision: how to handle a residual color cast (see below).**
+**Branch:** `master` · **Next tag:** `v0.1.0` (after the color decision + sign-off)
 
 ---
 
@@ -28,21 +28,41 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## The one thing left before Phase 2
+## ⚠️ START HERE NEXT SESSION — the color decision
 
-**Final human sign-off:** confirm the corrected preview color looks right in the
-running app (import → click a photo → slider). Already verified offline on 3 real
-X-T5 frames via `examples/diag.rs`; this is the last eyeball check. Do **not**
-start Phase 2 until confirmed.
+Everything in Phase 1 works (import, thumbs, decode, live exposure, export stub).
+The remaining issue is **color quality**, and it needs a decision before sign-off.
 
-```
-npm run tauri dev        # normal launch (Vite + Rust)
-```
+**What we know (fully diagnosed — see INSIGHTS "rawler 0.7.2 X-T5 color"):**
+- rawler's demosaic is correct (sharp, X-Trans handled).
+- rawler **does** apply as-shot WB + the camera color matrix.
+- BUT a residual **green/cyan cast** remains: the brightest near-white target
+  (a white mouse) develops to ~`R75 G102 B112` — red low, blue high — worst in
+  dim midtones. It's a **matrix/illuminant residual, not a WB error**, so a global
+  per-channel gain can't fix it (we tried — gamma→magenta, linear→green,
+  matrix C→blue). The current code uses **rawler's unmodified default** (the
+  earlier "apply_as_shot_wb" fix was a wrong double-WB and has been reverted).
+
+**Decision to make (pick one, then implement):**
+1. **Ship Phase 1 on rawler's default** (mild cast, honest baseline), tag
+   `v0.1.0`, and make proper color the *first task of Phase 2*. Recommended —
+   keeps the phase gate clean; color is explicitly a Phase 2 concern.
+2. **Own the color pipeline now:** pull rawler's *linear camera RGB* (develop with
+   steps `[Rescale, Demosaic, CropActiveArea, CropDefault]` — confirmed to yield
+   pre-matrix linear data) and do WB → matrix → sRGB ourselves, with
+   illuminant-aware matrix selection (rawler has both `A` and `D65` for this
+   camera; it defaults to D65, which mismatches warm indoor shots). This is the
+   real fix and sets up the Phase 2 WB slider.
+3. **Try a newer rawler** (>0.7.2) in case X-T5 color improved upstream. Cheapest
+   to test; may shift the API. (We pinned 0.7.2 ourselves; not a hard constraint.)
+
+`examples/diag.rs` is the investigation harness — run
+`cargo run --example diag -- <file.RAF>` for wb_coeffs/CFA/matrix/channel means/
+brightest-pixel balance + saved PNGs. Use it to validate any color change.
 
 **Launch note:** inside Claude's sandbox, background launches get reaped at turn
-boundaries. To keep a window open across turns, launch via Windows Task Scheduler
-(task `PixagramDev` runs `run-dev.cmd`): `Start-ScheduledTask -TaskName PixagramDev`.
-Outside the sandbox, `npm run tauri dev` is fine.
+boundaries — launch via Windows Task Scheduler (`Start-ScheduledTask -TaskName
+PixagramDev`, runs `run-dev.cmd`). Outside the sandbox, `npm run tauri dev` works.
 
 ## Resume cheat-sheet
 - Architecture & rules: [../CLAUDE.md](../CLAUDE.md)
@@ -73,11 +93,8 @@ sliders. Concretely, the first moves:
 ## Open risks / decisions to make
 - **EXIF policy on export** (Phase 5): preserve / strip / preserve-minus-GPS — not
   yet decided. Flag to the user when Phase 5 starts.
-- **White balance is corrected post-develop** (`raf::apply_as_shot_wb`) as an
-  empirical fix for rawler's missing WB (see INSIGHTS). It's not the
-  colorimetrically ideal "WB in camera-linear before the matrix." When Phase 2
-  builds the temp/tint WB adjustment, decide whether to own more of the color
-  pipeline (skip rawler's calibrate, do matrix+WB ourselves) for full correctness.
+- **Residual color cast** in rawler's X-T5 develop — the open decision above. Tied
+  to the Phase 2 WB/temp-tint adjustment; resolve before or as part of Phase 2.
 - **Drag-and-drop import** not implemented yet (Phase 1 needed only the picker).
   Easy add in Phase 2 via Tauri's file-drop event.
 - **Preview is 8-bit** — see INSIGHTS; move to 16-bit/float before stacking tone

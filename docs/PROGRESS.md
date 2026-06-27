@@ -7,7 +7,28 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
-## 2026-06-26 — Phase 1 verification + color fix
+## 2026-06-26 (session 2b) — color investigation, reverted bad WB fix
+
+User reported the preview looked **magenta** after the previous session's WB
+"fix". Investigated deeply with `examples/diag.rs` on real frames:
+- rawler **does** apply as-shot WB (toggled the WhiteBalance step: ON center
+  `[65,51,36]` warm vs OFF `[47,57,7]` green) and the color matrix. Demosaic fine.
+- So last session's `apply_as_shot_wb` was a **double WB** → magenta + blue clip.
+  **Reverted it**; `develop_raf` now returns rawler's unmodified default.
+- Real remaining issue: a milder green/cyan residual (white target ~`R75 G102
+  B112`) = matrix/illuminant residual, NOT fixable by a global gain (tried gamma
+  →magenta, linear→green, C-matrix→blue; all bracket, none nail it).
+- **Left as an open decision** for next session (see HANDOFF "START HERE"): ship
+  on rawler default vs own the color pipeline vs try newer rawler.
+
+Lesson: don't "correct" a decode without first proving what the library already
+does (a WhiteBalance step toggle would have saved a long detour).
+
+**Next:** make the color decision, then final Phase 1 sign-off + tag v0.1.0.
+
+---
+
+## 2026-06-26 — Phase 1 verification + color fix (NOTE: WB fix later reverted, see session 2b)
 
 **Ran the app on real X-T5 RAFs** (via a Windows Task Scheduler launch — the
 sandbox reaps Claude's child processes at turn boundaries, so a normal background

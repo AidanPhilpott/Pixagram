@@ -13,8 +13,11 @@ src-tauri/gen/
 # Claude Code local settings
 .claude/settings.local.json
 
-# Generated source icon (regenerated from app-icon.png via `tauri icon`)
+# Build / dev logs and diagnostic outputs
 src-tauri/build-log.txt
+tauri-dev.log
+diag_*.png
+diag_out.png
 
 # Editor / OS
 .DS_Store

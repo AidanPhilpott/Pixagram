@@ -24,6 +24,17 @@ in [../CLAUDE.md](../CLAUDE.md).)
   `Intermediate`, then `.to_dynamic_image()` → `image::DynamicImage` (sRGB,
   `ImageRgb16` for color). `RawDevelop` picks the demosaic — **Markesteijn for
   X-Trans** — so we don't hand-roll it.
+- **rawler 0.7.2 does NOT apply as-shot white balance for X-T5 files.** Its
+  `RawDevelop` output is green-dominant (sensor is green-heavy; WB never lands —
+  `develop` reads `wb_coeffs` and `map_3ch_to_rgb` multiplies by them in code, but
+  empirically zero applications reach the output). Demosaic itself is correct
+  (sharp, no maze artifacts — X-Trans is handled). Fix lives in
+  `raf::apply_as_shot_wb`: multiply the developed sRGB by `wb_coeffs` normalized to
+  green=1.0 (R×~1.86, B×~2.20 for the test frames). Verified on 3 diverse frames
+  (neutral subjects go neutral, real greens stay green). `wb_coeffs[3]` is NaN
+  (X-Trans has no 2nd green) — ignore it. Diagnostic tool:
+  `cargo run --example diag -- <file.RAF>` prints wb_coeffs/CFA/matrix/means and
+  saves before/after PNGs.
 - **Pin `image` to the version rawler re-exports (0.25).** A mismatched `image`
   version makes the returned `DynamicImage` a *different* type than our crate's,
   and nothing type-checks. The plain `Vec<u8>/Vec<u16>` from `.into_raw()` is the

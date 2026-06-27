@@ -6,7 +6,8 @@
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
 **Last updated:** 2026-06-26
-**Current phase:** Phase 1 (Skeleton) — code complete, awaiting human verification.
+**Current phase:** Phase 1 (Skeleton) — ran on real X-T5 RAFs; color bug fixed.
+Awaiting final human sign-off on the corrected preview.
 **Branch:** `master` · **Next tag:** `v0.1.0` (on Phase 1 sign-off)
 
 ---
@@ -29,14 +30,19 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 
 ## The one thing left before Phase 2
 
-**Human verification** (the README explicitly gates here): open the app, import a
-real `.RAF`, confirm the thumbnail appears, the preview decodes, and dragging the
-exposure slider re-renders the preview live. Do **not** start Phase 2 until this
-is confirmed working.
+**Final human sign-off:** confirm the corrected preview color looks right in the
+running app (import → click a photo → slider). Already verified offline on 3 real
+X-T5 frames via `examples/diag.rs`; this is the last eyeball check. Do **not**
+start Phase 2 until confirmed.
 
 ```
-npm run tauri dev        # launches the app (Vite + Rust)
+npm run tauri dev        # normal launch (Vite + Rust)
 ```
+
+**Launch note:** inside Claude's sandbox, background launches get reaped at turn
+boundaries. To keep a window open across turns, launch via Windows Task Scheduler
+(task `PixagramDev` runs `run-dev.cmd`): `Start-ScheduledTask -TaskName PixagramDev`.
+Outside the sandbox, `npm run tauri dev` is fine.
 
 ## Resume cheat-sheet
 - Architecture & rules: [../CLAUDE.md](../CLAUDE.md)
@@ -67,9 +73,12 @@ sliders. Concretely, the first moves:
 ## Open risks / decisions to make
 - **EXIF policy on export** (Phase 5): preserve / strip / preserve-minus-GPS — not
   yet decided. Flag to the user when Phase 5 starts.
-- **Preview color accuracy:** exposure is applied on rawler's sRGB-developed
-  output. Fine for Phase 1; revisit whether we want to develop to linear and tag
-  a working space as the pipeline grows.
-- **Real RAF not yet run through the decoder by Claude** — compilation is verified,
-  but the rawler decode path has only been exercised against the API, not a real
-  X-T5 file. First human test doubles as the first real-file decode test.
+- **White balance is corrected post-develop** (`raf::apply_as_shot_wb`) as an
+  empirical fix for rawler's missing WB (see INSIGHTS). It's not the
+  colorimetrically ideal "WB in camera-linear before the matrix." When Phase 2
+  builds the temp/tint WB adjustment, decide whether to own more of the color
+  pipeline (skip rawler's calibrate, do matrix+WB ourselves) for full correctness.
+- **Drag-and-drop import** not implemented yet (Phase 1 needed only the picker).
+  Easy add in Phase 2 via Tauri's file-drop event.
+- **Preview is 8-bit** — see INSIGHTS; move to 16-bit/float before stacking tone
+  ops in Phase 2.

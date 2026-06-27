@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { ThumbnailGrid } from "./components/ThumbnailGrid";
 import { Preview } from "./components/Preview";
 import { ExposureSlider } from "./components/ExposureSlider";
@@ -23,6 +23,10 @@ export function App() {
 
   const [importing, setImporting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+
+  // Cache developed previews by id so reselecting a photo doesn't re-decode the
+  // RAF (brief: "cache decoded previews; don't re-decode on every interaction").
+  const previewCache = useRef<Map<string, PreviewPayload>>(new Map());
 
   const selected = useMemo(
     () => entries.find((e) => e.id === selectedId) ?? null,
@@ -53,11 +57,20 @@ export function App() {
 
   const handleSelect = useCallback(async (entry: ImageEntry) => {
     setSelectedId(entry.id);
+    setStatus(null);
+
+    const cached = previewCache.current.get(entry.id);
+    if (cached) {
+      setPreview(cached);
+      setPreviewLoading(false);
+      return;
+    }
+
     setPreview(null);
     setPreviewLoading(true);
-    setStatus(null);
     try {
       const payload = await decodePreview(entry.path);
+      previewCache.current.set(entry.id, payload);
       setPreview(payload);
     } catch (e) {
       setStatus(`Decode failed: ${e instanceof Error ? e.message : String(e)}`);

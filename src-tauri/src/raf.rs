@@ -28,7 +28,10 @@ const THUMB_MAX_EDGE: u32 = 384;
 
 /// Decode a Fujifilm RAF and develop it to an sRGB [`DynamicImage`].
 ///
-/// This is the only place that pays the full X-Trans demosaic cost.
+/// This is the only place that pays the full X-Trans demosaic cost. We also
+/// apply the camera's as-shot white balance here (see [`apply_as_shot_wb`]):
+/// that is part of *developing the raw to a neutral image*, not a user edit —
+/// the Phase 2 temp/tint slider will adjust relative to this baseline.
 pub fn develop_raf<P: AsRef<Path>>(path: P) -> Result<DynamicImage> {
     let path = path.as_ref();
     let raw = rawler::decode_file(path)
@@ -39,9 +42,48 @@ pub fn develop_raf<P: AsRef<Path>>(path: P) -> Result<DynamicImage> {
         .develop_intermediate(&raw)
         .map_err(|e| anyhow!("develop failed for {}: {e}", path.display()))?;
 
-    intermediate
+    let developed = intermediate
         .to_dynamic_image()
-        .ok_or_else(|| anyhow!("develop produced no displayable image for {}", path.display()))
+        .ok_or_else(|| anyhow!("develop produced no displayable image for {}", path.display()))?;
+
+    Ok(apply_as_shot_wb(developed, raw.wb_coeffs))
+}
+
+/// Apply the camera's as-shot white balance to a developed sRGB image.
+///
+/// **Why this exists:** rawler 0.7.2's `RawDevelop` does not effectively apply
+/// the as-shot WB for X-T5 files — its output comes out green-dominant, and one
+/// application of `wb_coeffs` neutralizes it (verified on three diverse real
+/// X-Trans frames: neutral subjects go neutral, real greens stay green). We
+/// apply the coefficients as a direct gain on the encoded sRGB values,
+/// normalized so green = 1.0 (a pure WB, no net green-channel change).
+///
+/// Applied post-develop (after rawler's color matrix) it's an empirical
+/// correction rather than the colorimetrically ideal "WB in camera-linear space
+/// before the matrix" — but it matches correct color closely across test frames
+/// and is what we can do without reimplementing rawler's calibration.
+/// `wb_coeffs[3]` (the X-Trans-absent second green) is NaN and ignored. Revisit
+/// if a future rawler bump fixes WB internally, or when Phase 2 builds the WB
+/// adjustment and may take over the color pipeline.
+fn apply_as_shot_wb(img: DynamicImage, wb: [f32; 4]) -> DynamicImage {
+    let g = if wb[1].is_finite() && wb[1] != 0.0 { wb[1] } else { 1.0 };
+    let gain = [
+        if wb[0].is_finite() { wb[0] / g } else { 1.0 },
+        1.0,
+        if wb[2].is_finite() { wb[2] / g } else { 1.0 },
+    ];
+
+    // Nothing to do if the camera reported a neutral (or missing) WB.
+    if (gain[0] - 1.0).abs() < 1e-3 && (gain[2] - 1.0).abs() < 1e-3 {
+        return img;
+    }
+
+    let mut rgb = img.into_rgb16();
+    for px in rgb.pixels_mut() {
+        px[0] = (px[0] as f32 * gain[0]).min(65535.0) as u16;
+        px[2] = (px[2] as f32 * gain[2]).min(65535.0) as u16;
+    }
+    DynamicImage::ImageRgb16(rgb)
 }
 
 /// Find a camera-JPEG sidecar (`.JPG`/`.JPEG`, any case) next to a RAF.

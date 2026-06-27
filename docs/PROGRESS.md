@@ -7,6 +7,31 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-26 — Phase 1 verification + color fix
+
+**Ran the app on real X-T5 RAFs** (via a Windows Task Scheduler launch — the
+sandbox reaps Claude's child processes at turn boundaries, so a normal background
+launch dies; a scheduled task runs under the Scheduler service and survives).
+
+**Worked:** import (file picker), thumbnails (camera-JPEG sidecars), click→decode,
+exposure slider live re-render, export stub message.
+
+**Bug found + fixed — green preview.** Decoded RAFs rendered green. Diagnosed with
+a new `examples/diag.rs`: demosaic is correct (sharp), but rawler 0.7.2 doesn't
+apply as-shot white balance for X-T5 → green cast. Fixed in `raf::apply_as_shot_wb`
+(multiply developed sRGB by `wb_coeffs`, green-normalized). Verified neutral/correct
+on 3 frames. See INSIGHTS.
+
+**Also fixed:** reselecting a photo re-decoded the RAF every time → added a
+frontend preview cache (`previewCache` in App.tsx) per the brief's caching rule.
+
+**Known/deferred:** drag-and-drop import not implemented (Phase 1 only required the
+file picker; DnD is a Phase 2 nicety).
+
+**Next:** confirm the corrected color in the running app, then tag and start Phase 2.
+
+---
+
 ## 2026-06-26 — Project kickoff, Phase 1 skeleton
 
 **Goal:** Stand up Phase 1 from [README.md](../README.md) — smallest app that

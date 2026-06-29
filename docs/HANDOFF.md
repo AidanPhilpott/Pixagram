@@ -6,10 +6,11 @@
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
 **Last updated:** 2026-06-29 (end of session 3)
-**Current phase:** Phase 1 (Skeleton) — fully functional end-to-end on real X-T5
-RAFs. **The green-cast color bug is FIXED** (owned develop pipeline). Awaiting a
-human to eyeball the running app, then tag `v0.1.0`.
-**Branch:** `master` · **Next tag:** `v0.1.0` (after app sign-off)
+**Current phase:** Phase 1 (Skeleton) — **COMPLETE, color-verified, tagged
+`v0.1.0`** (commit `676b874`). The green-cast bug is fixed via the owned develop
+pipeline; confirmed correct in the running app on real X-T5 frames (cityscape +
+windowsill plant). **Next session: begin Phase 2.**
+**Branch:** `master` (local-only, no remote) · **Last tag:** `v0.1.0`
 
 ---
 
@@ -29,14 +30,15 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — verify the app, then tag v0.1.0
+## ⚠️ START HERE NEXT SESSION — begin Phase 2
 
-The green-cast bug is fixed (chose original-decision option 2: **own the color
-pipeline**, but the root cause turned out to be rawler's *demosaic*, not WB — see
-below). Everything compiles, tests pass, and the develop is validated neutral on
-all 5 sample frames. **Next action: open the running app, click a RAF, confirm the
-edit preview now shows correct color (no green) and the exposure slider still works
-live. If good → tag `v0.1.0` and start Phase 2.**
+Phase 1 is done and tagged `v0.1.0`. The green-cast bug is fixed (chose
+original-decision option 2: **own the color pipeline**; root cause turned out to be
+rawler's *demosaic*, not WB — see below). App verified by the user. **Next action:
+start Phase 2 — see "What's next" below; grow the shared adjustment definition one
+op at a time. The Phase-2 color follow-ups (full-res export demosaic, tone curve to
+replace `BASELINE_EXPOSURE_EV`, illuminant interpolation) are listed under "Open
+risks."** Context on the fix that just landed:
 
 **What was actually wrong (corrected diagnosis — supersedes old notes):**
 - The cast was rawler 0.7.2's **X-Trans demosaic** inflating green ~1.8× (the

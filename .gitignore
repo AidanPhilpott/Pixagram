@@ -18,6 +18,8 @@ src-tauri/build-log.txt
 tauri-dev.log
 diag_*.png
 diag_out.png
+diag_fix.png
+check_*.png
 
 # Editor / OS
 .DS_Store

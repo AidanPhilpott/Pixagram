@@ -1,23 +1,28 @@
 //! RAF decode + preview/thumbnail generation.
 //!
-//! Constraint #2 from the brief: X-Trans-aware decode. We lean on `rawler`'s
-//! `RawDevelop`, which dispatches the correct demosaic (Markesteijn for the
-//! X-T5's X-Trans CFA) and outputs an sRGB image — so exported/previewed JPEGs
-//! are correctly sRGB-tagged downstream.
+//! Constraint #2 from the brief: X-Trans-aware decode. The actual color develop
+//! lives in [`crate::develop`] — an owned, camera-general pipeline that reads the
+//! raw mosaic + metadata and demosaics/white-balances/matrixes it ourselves,
+//! because rawler 0.7.2's demosaic distorts X-Trans channel balance (see that
+//! module and docs/INSIGHTS.md). This module is the thin I/O layer around it:
+//! sidecar discovery, downscaled-image encoding, and `data:` URL packaging.
 //!
 //! Performance (brief's architecture rules):
 //! - Thumbnails come from the camera JPEG sidecar when present (the user shoots
-//!   RAW+JPEG), falling back to a downscaled RAF develop. Browsing never decodes
+//!   RAW+JPEG), falling back to a downscaled owned develop. Browsing never decodes
 //!   a full RAF when a JPEG is available.
-//! - The editing preview decodes the RAF lazily and is downscaled before it
-//!   crosses the IPC boundary; we never ship a full 40MP buffer to the frontend.
+//! - The editing preview decodes the RAF lazily and is downscaled *inside* the
+//!   develop (the demosaic emits the reduced image directly), so a full 40MP
+//!   buffer never crosses the IPC boundary.
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use base64::Engine;
 use image::{DynamicImage, ImageFormat};
+
+use crate::develop;
 
 /// Longest-edge cap for the editing preview, in pixels. Big enough to judge
 /// color and detail, small enough to stay responsive. Tunable, not architecture.
@@ -25,30 +30,6 @@ const PREVIEW_MAX_EDGE: u32 = 2048;
 
 /// Longest-edge cap for grid thumbnails, in pixels.
 const THUMB_MAX_EDGE: u32 = 384;
-
-/// Decode a Fujifilm RAF and develop it to an sRGB [`DynamicImage`].
-///
-/// This is the only place that pays the full X-Trans demosaic cost. rawler's
-/// `RawDevelop` already applies the as-shot white balance and camera color matrix
-/// and outputs sRGB. (Do NOT re-apply white balance here — rawler's WhiteBalance
-/// step is active; a second pass double-corrects and pushes highlights magenta.
-/// A milder green/cyan residual remains in rawler 0.7.2's X-T5 color — that is a
-/// matrix/illuminant issue to address properly in Phase 2's color work, not with
-/// a global gain. See docs/INSIGHTS.md.)
-pub fn develop_raf<P: AsRef<Path>>(path: P) -> Result<DynamicImage> {
-    let path = path.as_ref();
-    let raw = rawler::decode_file(path)
-        .map_err(|e| anyhow!("RAF decode failed for {}: {e}", path.display()))?;
-
-    let developer = rawler::imgop::develop::RawDevelop::default();
-    let intermediate = developer
-        .develop_intermediate(&raw)
-        .map_err(|e| anyhow!("develop failed for {}: {e}", path.display()))?;
-
-    intermediate
-        .to_dynamic_image()
-        .ok_or_else(|| anyhow!("develop produced no displayable image for {}", path.display()))
-}
 
 /// Find a camera-JPEG sidecar (`.JPG`/`.JPEG`, any case) next to a RAF.
 fn sidecar_jpeg(raf: &Path) -> Option<PathBuf> {
@@ -89,16 +70,14 @@ pub struct PreviewPayload {
 }
 
 /// Decode + develop a RAF and return a downscaled PNG preview.
+///
+/// The develop is downscaled to [`PREVIEW_MAX_EDGE`] inside the owned pipeline
+/// (the area-averaging demosaic produces the reduced image directly), so the
+/// buffer never crosses IPC at full sensor resolution.
 pub fn preview(path: &str) -> Result<PreviewPayload> {
-    let developed = develop_raf(path)?;
-    // Downscale before crossing IPC — never ship a full 40MP buffer.
-    let scaled = developed.resize(
-        PREVIEW_MAX_EDGE,
-        PREVIEW_MAX_EDGE,
-        image::imageops::FilterType::Lanczos3,
-    );
-    let (width, height) = (scaled.width(), scaled.height());
-    let data_url = to_data_url(&scaled, ImageFormat::Png)?;
+    let developed = develop::develop_raf(Path::new(path), PREVIEW_MAX_EDGE)?;
+    let (width, height) = (developed.width(), developed.height());
+    let data_url = to_data_url(&developed, ImageFormat::Png)?;
     Ok(PreviewPayload {
         width,
         height,
@@ -114,10 +93,11 @@ pub fn thumbnail(raf_path: &str) -> Result<String> {
     let raf = Path::new(raf_path);
     let source = match sidecar_jpeg(raf) {
         Some(jpg) => image::open(&jpg)
-            .with_context(|| format!("opening sidecar JPEG {}", jpg.display()))?,
-        None => develop_raf(raf)?,
+            .with_context(|| format!("opening sidecar JPEG {}", jpg.display()))?
+            .thumbnail(THUMB_MAX_EDGE, THUMB_MAX_EDGE),
+        // No sidecar: develop the raw straight to thumbnail size via the owned path.
+        None => develop::develop_raf(raf, THUMB_MAX_EDGE)?,
     };
-    let thumb = source.thumbnail(THUMB_MAX_EDGE, THUMB_MAX_EDGE);
     // JPEG keeps the thumbnail payload small; thumbnails are not edited.
-    to_data_url(&thumb, ImageFormat::Jpeg)
+    to_data_url(&source, ImageFormat::Jpeg)
 }

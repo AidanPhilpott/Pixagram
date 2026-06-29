@@ -24,22 +24,41 @@ in [../CLAUDE.md](../CLAUDE.md).)
   `Intermediate`, then `.to_dynamic_image()` → `image::DynamicImage` (sRGB,
   `ImageRgb16` for color). `RawDevelop` picks the demosaic — **Markesteijn for
   X-Trans** — so we don't hand-roll it.
-- **rawler 0.7.2 X-T5 color has a residual green/cyan cast — do NOT "fix" it with
-  a second white-balance pass.** Hard-won lesson: rawler's `RawDevelop` *does*
-  apply the as-shot WB (proved via toggling the `WhiteBalance` step: ON center
-  px `[65,51,36]` warm vs OFF `[47,57,7]` green) and the camera color matrix.
-  Demosaic is correct (sharp, X-Trans handled). But the brightest near-white target
-  (the white mouse) still develops to ~`R75 G102 B112` — red low, blue high = a
-  green/cyan cast, worst in the dim midtones. This is a **color-matrix/illuminant
-  residual, not a WB error**, so a global per-channel gain can't fix it: applying
-  the as-shot `wb_coeffs` a second time double-corrects and pushes highlights
-  **magenta** (and clips blue). We tried post-develop WB in gamma space (→magenta),
-  linear space (→green), and a `C = cam2rgb·diag(wb)·cam2rgb⁻¹` matrix (→blue);
-  all bracket but none nail it because the error isn't a single global gain.
-  **Decision: leave rawler's default; do proper color calibration in Phase 2**
-  (own black-level/matrix/illuminant, consider auto-WB, or try a newer rawler).
-  Diagnostic: `cargo run --example diag -- <file.RAF>` prints wb_coeffs / CFA /
-  matrix / channel means / brightest-pixel balance and saves PNGs.
+- **The green cast was rawler 0.7.2's DEMOSAIC, not white balance — we now own the
+  develop (`src/develop.rs`). Earlier "matrix/illuminant residual" notes were WRONG.**
+  Definitive diagnosis (see `examples/diag.rs`): averaging the raw sensor mosaic
+  per CFA color *before any demosaic* shows the camera's as-shot WB neutralizes the
+  raw sites cleanly (R/G, B/G ≈ 1.0 across 3 frames). But rawler's `RawDevelop`
+  demosaiced output has R/G ≈ 0.25 — green inflated ~1.8× vs red/blue, because the
+  X-Trans 20-of-36 green oversampling isn't normalized. Correct WB applied to those
+  unbalanced pixels can never be neutral, so everything renders green. The metadata
+  (black level 1023, white 16383, `wb_coeffs`, D65/A color matrices) is all correct
+  and self-consistent — only the demosaic is at fault. (Confirmed the Fuji WB tags
+  too: rawler reads 0xf00e/`WB_GRBLevels` ≈ the camera's auto WB 0xf00d; those are
+  right, they just can't fix a demosaic-distorted image.)
+- **Owned develop pipeline (camera-general, `src/develop.rs`):** use rawler ONLY to
+  unpack the mosaic (`raw.data`) + read metadata (`blacklevel`, `whitelevel`,
+  `wb_coeffs`, `color_matrix`, `camera.cfa`, `active_area`). Then run the canonical
+  order ourselves: black-subtract & normalize → demosaic → WB (green-normalized)
+  → camera→sRGB matrix (`inv(normalize_rows(xyz2cam · srgb→xyz))`, D65) → baseline
+  exposure → sRGB gamma. **Demosaic = area-averaging** (each output pixel averages
+  the real R/G/B sites in its footprint, expanded to ≥1 CFA tile so every color is
+  present); correct-by-construction and emits the downscaled preview directly.
+  Validated to ≈neutral on all 5 frames and visually matched to the camera JPEGs
+  via `cargo run --release --example develop_check -- <RAF>`.
+- **Two non-obvious gotchas:** (1) `develop`'s area-average is softer than a
+  full-res Markesteijn demosaic — fine for the downscaled preview, but EXPORT needs
+  a real full-res demosaic (deferred). (2) A pure linear→sRGB develop is ~1.7 EV
+  darker than the tone-curved camera JPEG (Fuji also rates ISO low), so
+  `develop::BASELINE_EXPOSURE_EV` adds a flat profile-style lift; Phase 2's tone
+  curve should replace it. The user's exposure slider stacks on top.
+- **CFA `color_at(row,col)` is absolute-sensor-indexed** (`(row+48)%48`), so pass
+  absolute coordinates even when iterating inside `active_area`. Index black level
+  by `levels[(row%bh)*bw + col%bw]`. `color_at` returns 0=R, 1=G, 2=B (X-Trans site
+  counts came out 8:20:8 per 6×6 tile, confirming the mapping).
+- Diagnostics: `examples/diag.rs` prints raw-mosaic vs demosaiced channel balance,
+  the Fuji makernote WB tags, and per-illuminant renders; `examples/develop_check.rs`
+  runs the *production* develop and reports neutrality. Both save ~1000px PNGs.
 - **Pin `image` to the version rawler re-exports (0.25).** A mismatched `image`
   version makes the returned `DynamicImage` a *different* type than our crate's,
   and nothing type-checks. The plain `Vec<u8>/Vec<u16>` from `.into_raw()` is the

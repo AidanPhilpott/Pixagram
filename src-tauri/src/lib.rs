@@ -6,12 +6,23 @@
 //! - `export_stub`   — confirm the shared `Adjustments` reaches Rust end-to-end.
 
 mod adjustments;
+mod develop;
 mod export;
 mod raf;
 
 use std::path::Path;
 
 use adjustments::Adjustments;
+
+/// Diagnostic hook: run the owned develop pipeline directly (used by the
+/// `develop_check` example to validate color against the camera JPEG).
+#[doc(hidden)]
+pub fn develop_for_test(
+    path: &Path,
+    max_edge: u32,
+) -> anyhow::Result<image::DynamicImage> {
+    develop::develop_raf(path, max_edge)
+}
 
 /// One entry in the working-set thumbnail grid.
 #[derive(serde::Serialize)]

@@ -5,10 +5,11 @@
 > dated entry to [PROGRESS.md](PROGRESS.md) for the running history, and add any
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
-**Last updated:** 2026-06-26 (end of session 2)
+**Last updated:** 2026-06-29 (end of session 3)
 **Current phase:** Phase 1 (Skeleton) — fully functional end-to-end on real X-T5
-RAFs. **One open decision: how to handle a residual color cast (see below).**
-**Branch:** `master` · **Next tag:** `v0.1.0` (after the color decision + sign-off)
+RAFs. **The green-cast color bug is FIXED** (owned develop pipeline). Awaiting a
+human to eyeball the running app, then tag `v0.1.0`.
+**Branch:** `master` · **Next tag:** `v0.1.0` (after app sign-off)
 
 ---
 
@@ -28,37 +29,39 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — the color decision
+## ⚠️ START HERE NEXT SESSION — verify the app, then tag v0.1.0
 
-Everything in Phase 1 works (import, thumbs, decode, live exposure, export stub).
-The remaining issue is **color quality**, and it needs a decision before sign-off.
+The green-cast bug is fixed (chose original-decision option 2: **own the color
+pipeline**, but the root cause turned out to be rawler's *demosaic*, not WB — see
+below). Everything compiles, tests pass, and the develop is validated neutral on
+all 5 sample frames. **Next action: open the running app, click a RAF, confirm the
+edit preview now shows correct color (no green) and the exposure slider still works
+live. If good → tag `v0.1.0` and start Phase 2.**
 
-**What we know (fully diagnosed — see INSIGHTS "rawler 0.7.2 X-T5 color"):**
-- rawler's demosaic is correct (sharp, X-Trans handled).
-- rawler **does** apply as-shot WB + the camera color matrix.
-- BUT a residual **green/cyan cast** remains: the brightest near-white target
-  (a white mouse) develops to ~`R75 G102 B112` — red low, blue high — worst in
-  dim midtones. It's a **matrix/illuminant residual, not a WB error**, so a global
-  per-channel gain can't fix it (we tried — gamma→magenta, linear→green,
-  matrix C→blue). The current code uses **rawler's unmodified default** (the
-  earlier "apply_as_shot_wb" fix was a wrong double-WB and has been reverted).
+**What was actually wrong (corrected diagnosis — supersedes old notes):**
+- The cast was rawler 0.7.2's **X-Trans demosaic** inflating green ~1.8× (the
+  20-of-36 green oversampling isn't normalized). The camera metadata (black/white
+  levels, as-shot WB, color matrix) is all CORRECT — the camera's own WB
+  neutralizes the *raw mosaic* perfectly; rawler's demosaic is what breaks it.
+- Old "matrix/illuminant residual, not a WB error" notes were wrong (the
+  brightest-pixel test was confounded by clipping). Fully re-diagnosed by reading
+  the raw sensor sites directly. Details in INSIGHTS.
 
-**Decision to make (pick one, then implement):**
-1. **Ship Phase 1 on rawler's default** (mild cast, honest baseline), tag
-   `v0.1.0`, and make proper color the *first task of Phase 2*. Recommended —
-   keeps the phase gate clean; color is explicitly a Phase 2 concern.
-2. **Own the color pipeline now:** pull rawler's *linear camera RGB* (develop with
-   steps `[Rescale, Demosaic, CropActiveArea, CropDefault]` — confirmed to yield
-   pre-matrix linear data) and do WB → matrix → sRGB ourselves, with
-   illuminant-aware matrix selection (rawler has both `A` and `D65` for this
-   camera; it defaults to D65, which mismatches warm indoor shots). This is the
-   real fix and sets up the Phase 2 WB slider.
-3. **Try a newer rawler** (>0.7.2) in case X-T5 color improved upstream. Cheapest
-   to test; may shift the API. (We pinned 0.7.2 ourselves; not a hard constraint.)
+**The fix (`src-tauri/src/develop.rs`, camera-general — not Fuji-specific):**
+use rawler only to unpack the mosaic + read metadata, then own the develop:
+black-subtract/normalize → area-averaging demosaic → WB → camera→sRGB matrix (D65)
+→ baseline exposure (`BASELINE_EXPOSURE_EV`) → sRGB gamma. `raf::preview` and the
+sidecar-less `raf::thumbnail` fallback both call it. Camera-JPEG thumbnails are
+unchanged. Validate any color change with
+`cargo run --release --example develop_check -- <RAF>` (runs the real pipeline,
+prints neutrality, saves `check_<stem>.png`); `examples/diag.rs` is the deeper
+metadata/mosaic harness.
 
-`examples/diag.rs` is the investigation harness — run
-`cargo run --example diag -- <file.RAF>` for wb_coeffs/CFA/matrix/channel means/
-brightest-pixel balance + saved PNGs. Use it to validate any color change.
+**Known follow-ups created by this fix (not blockers for v0.1.0):**
+- Preview demosaic is area-averaging (softer than Markesteijn). **Export needs a
+  real full-res demosaic** — deferred.
+- `BASELINE_EXPOSURE_EV = 1.7` is a flat lift standing in for a tone curve; Phase 2
+  tone curve should replace it. Single D65 matrix (no illuminant interpolation yet).
 
 **Launch note:** inside Claude's sandbox, background launches get reaped at turn
 boundaries — launch via Windows Task Scheduler (`Start-ScheduledTask -TaskName
@@ -93,8 +96,12 @@ sliders. Concretely, the first moves:
 ## Open risks / decisions to make
 - **EXIF policy on export** (Phase 5): preserve / strip / preserve-minus-GPS — not
   yet decided. Flag to the user when Phase 5 starts.
-- **Residual color cast** in rawler's X-T5 develop — the open decision above. Tied
-  to the Phase 2 WB/temp-tint adjustment; resolve before or as part of Phase 2.
+- **Export-quality demosaic.** The owned develop uses area-averaging (great for the
+  downscaled preview, too soft for full-res export). A real full-res demosaic
+  (Markesteijn for X-Trans, or fix/replace rawler) is needed before export ships.
+- **Baseline exposure vs tone curve.** `BASELINE_EXPOSURE_EV` is a flat stand-in;
+  Phase 2's tone curve should replace it. Also no illuminant interpolation yet
+  (single D65 matrix) — revisit when adding the WB temp/tint slider.
 - **Drag-and-drop import** not implemented yet (Phase 1 needed only the picker).
   Easy add in Phase 2 via Tauri's file-drop event.
 - **Preview is 8-bit** — see INSIGHTS; move to 16-bit/float before stacking tone

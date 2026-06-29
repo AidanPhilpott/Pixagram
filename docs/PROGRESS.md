@@ -7,6 +7,39 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-29 (session 3) — green cast root-caused + fixed (owned develop)
+
+Settled the color decision by **re-diagnosing from scratch**, which overturned the
+previous session's conclusion.
+
+- **Root cause:** not WB, not the matrix — it's rawler 0.7.2's **X-Trans demosaic**
+  inflating green ~1.8×. Proof: averaging the raw sensor mosaic per CFA color
+  (pre-demosaic) shows the camera's as-shot WB neutralizes the raw sites (R/G, B/G
+  ≈ 1.0 on 3 frames), while rawler's demosaiced output is ≈0.25 (green-heavy). The
+  metadata (black 1023 / white 16383 / `wb_coeffs` / D65+A matrices) is all correct.
+  Also dumped the Fuji makernote WB tags (0xf00c/d/e) directly — rawler reads the
+  right one. The old "matrix/illuminant residual" notes were a misread (confounded
+  by a luma>240 *midtone* bucket and highlight clipping).
+- **Fix:** new `src-tauri/src/develop.rs` — a camera-general owned develop. rawler
+  unpacks the mosaic + metadata only; we do black-subtract/normalize → area-averaging
+  demosaic (each output px averages real R/G/B sites in its footprint, expanded to
+  ≥1 CFA tile) → WB → camera→sRGB matrix (D65) → baseline exposure → sRGB gamma.
+  `raf::preview` + sidecar-less `raf::thumbnail` now call it; JPEG thumbs unchanged.
+- **Validated:** `examples/develop_check.rs` runs the production path — all 5 frames
+  come out neutral (means R≈G≈B, near-white R/G·B/G ≈ 0.96–1.15) and visually match
+  the camera JPEGs (city/bay scene + windowsill plant). Build clean, 2 unit tests pass.
+- **Deferred (logged in HANDOFF):** full-res export demosaic (area-average is soft);
+  `BASELINE_EXPOSURE_EV=1.7` flat lift pending Phase 2 tone curve; D65-only matrix.
+
+User's framing mattered: they want correct color by default for *any* camera, not a
+Fuji hack — so we fixed the pipeline at the source rather than papering over it with
+auto-WB. Also explained why thumbnails looked right (they're the camera JPEG) while
+the edit preview (rawler develop) was green.
+
+**Next:** human eyeballs the running app (color + live slider) → tag `v0.1.0`.
+
+---
+
 ## 2026-06-26 (session 2b) — color investigation, reverted bad WB fix
 
 User reported the preview looked **magenta** after the previous session's WB

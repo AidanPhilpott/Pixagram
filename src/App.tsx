@@ -11,6 +11,7 @@ import {
   type PreviewPayload,
 } from "./lib/ipc";
 import {
+  COLOR_RANGE,
   CONTRAST_RANGE,
   EXPOSURE_RANGE,
   TONE_RANGE,
@@ -37,6 +38,8 @@ const SLIDERS: ReadonlyArray<{
   { field: "shadows", label: "Shadows", range: TONE_RANGE, format: asPercent },
   { field: "whites", label: "Whites", range: TONE_RANGE, format: asPercent },
   { field: "blacks", label: "Blacks", range: TONE_RANGE, format: asPercent },
+  { field: "vibrance", label: "Vibrance", range: COLOR_RANGE, format: asPercent },
+  { field: "saturation", label: "Saturation", range: COLOR_RANGE, format: asPercent },
 ];
 
 export function App() {

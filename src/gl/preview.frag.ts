@@ -7,7 +7,7 @@
  *
  * Pipeline: sRGB -> linear, exposure (2^EV), white balance (luminance-preserving
  * chroma shift), linear -> sRGB, tone regions (highlights/shadows/whites/blacks),
- * contrast (S-curve around mid-grey 0.5), clip.
+ * contrast (S-curve around mid-grey 0.5), saturation/vibrance, clip.
  */
 export const FRAGMENT_SHADER = /* glsl */ `
 precision highp float;
@@ -22,6 +22,8 @@ uniform float uHighlights;  // [-1, 1], tone region
 uniform float uShadows;     // [-1, 1], tone region
 uniform float uWhites;      // [-1, 1], tone region
 uniform float uBlacks;      // [-1, 1], tone region
+uniform float uSaturation;  // [-1, 1], chroma scale (uniform)
+uniform float uVibrance;    // [-1, 1], chroma scale (weighted to muted colors)
 
 // Full-scale chroma strengths — MUST match WB_*_STRENGTH in adjustments.rs.
 const float WB_TEMP_STRENGTH = 0.3;
@@ -71,6 +73,15 @@ vec3 toneRegions(vec3 v) {
   return vec3(toneRegions(v.r), toneRegions(v.g), toneRegions(v.b));
 }
 
+// Saturation/vibrance: scale chroma around the pixel's own luma. Mirror of Rust
+// apply_saturation() — edit both together.
+vec3 applySaturation(vec3 rgb, float saturation, float vibrance) {
+  float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+  float pixelSat = max(max(rgb.r, rgb.g), rgb.b) - min(min(rgb.r, rgb.g), rgb.b);
+  float factor = (1.0 + saturation) * (1.0 + vibrance * (1.0 - pixelSat));
+  return clamp(mix(vec3(luma), rgb, factor), 0.0, 1.0);
+}
+
 // Luminance-preserving white balance on linear RGB.
 // Mirror of Rust apply_white_balance() — edit both together.
 vec3 applyWhiteBalance(vec3 lin, float temperature, float tint) {
@@ -98,7 +109,10 @@ void main() {
   // Encode to the perceptual domain, then shape tone regions + contrast.
   vec3 v = clamp(linearToSrgb(max(lin, 0.0)), 0.0, 1.0);
   v = toneRegions(v);
-  vec3 outColor = clamp(contrastCurve(v, uContrast), 0.0, 1.0);
+  v = clamp(contrastCurve(v, uContrast), 0.0, 1.0);
+
+  // Saturation / vibrance across all channels.
+  vec3 outColor = applySaturation(v, uSaturation, uVibrance);
 
   gl_FragColor = vec4(outColor, src.a);
 }

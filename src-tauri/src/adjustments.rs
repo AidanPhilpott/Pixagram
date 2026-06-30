@@ -28,6 +28,8 @@
 //! 5. **Tone regions** — highlights / shadows / whites / blacks, each a
 //!    smoothstep-masked lift on the perceptual value (per channel).
 //! 6. **Contrast** — an S-curve around perceptual mid-grey (0.5) on that value.
+//! 7. **Saturation / vibrance** — scale each pixel's chroma (distance from its
+//!    grey/luma), across all three channels at once.
 //!
 //! Later phases insert tone curve, HSL, etc. into this pipeline, all driven by
 //! additional fields on `Adjustments`. Order matters and is the contract — keep
@@ -70,6 +72,13 @@ pub struct Adjustments {
     /// Blacks in [-1.0, +1.0]. 0.0 = unchanged; positive lifts the near-black
     /// end, negative crushes it. UI shows [-100, +100].
     pub blacks: f32,
+    /// Saturation in [-1.0, +1.0]. 0.0 = unchanged; -1.0 = greyscale, +1.0 doubles
+    /// chroma. Scales every pixel's distance from its grey uniformly. UI [-100,+100].
+    pub saturation: f32,
+    /// Vibrance in [-1.0, +1.0]. 0.0 = unchanged. Like saturation but weighted by
+    /// `(1 - pixel saturation)`, so muted colors move more than already-vivid ones.
+    /// UI shows [-100, +100].
+    pub vibrance: f32,
 }
 
 impl Default for Adjustments {
@@ -83,6 +92,8 @@ impl Default for Adjustments {
             shadows: 0.0,
             whites: 0.0,
             blacks: 0.0,
+            saturation: 0.0,
+            vibrance: 0.0,
         }
     }
 }
@@ -148,6 +159,29 @@ fn apply_tone_regions(v: f32, adj: &Adjustments) -> f32 {
         + adj.whites * w_whites
         + adj.blacks * w_blacks;
     (v + TONE_STRENGTH * delta).clamp(0.0, 1.0)
+}
+
+/// Scale a perceptual RGB pixel's chroma (its distance from its own grey/luma).
+///
+/// Saturation scales every pixel equally; vibrance weights the scale by
+/// `(1 - pixel_saturation)` so muted colors move more than already-vivid ones.
+/// The two combine multiplicatively (0/0 = identity). Cross-channel, so this runs
+/// on the whole triple. **Mirror of `applySaturation` in the GLSL shader.**
+#[inline]
+fn apply_saturation(rgb: [f32; 3], saturation: f32, vibrance: f32) -> [f32; 3] {
+    if saturation == 0.0 && vibrance == 0.0 {
+        return rgb;
+    }
+    let luma = luminance(rgb);
+    let max_c = rgb[0].max(rgb[1]).max(rgb[2]);
+    let min_c = rgb[0].min(rgb[1]).min(rgb[2]);
+    let pixel_sat = max_c - min_c;
+    let factor = (1.0 + saturation) * (1.0 + vibrance * (1.0 - pixel_sat));
+    [
+        (luma + (rgb[0] - luma) * factor).clamp(0.0, 1.0),
+        (luma + (rgb[1] - luma) * factor).clamp(0.0, 1.0),
+        (luma + (rgb[2] - luma) * factor).clamp(0.0, 1.0),
+    ]
 }
 
 /// Rec.709 relative luminance of a linear-light RGB triple.
@@ -221,7 +255,8 @@ pub fn apply_pixel(adj: &Adjustments, rgb: [f32; 3]) -> [f32; 3] {
         let v = apply_tone_regions(v, adj);
         out[i] = apply_contrast(v, adj.contrast).clamp(0.0, 1.0);
     }
-    out
+    // Saturation / vibrance — cross-channel, so it runs on the whole triple.
+    apply_saturation(out, adj.saturation, adj.vibrance)
 }
 
 #[cfg(test)]
@@ -337,5 +372,32 @@ mod tests {
         let lift = Adjustments { whites: 1.0, ..Default::default() };
         let near_white = apply_pixel(&lift, [0.9; 3]);
         assert!(near_white[0] > 0.9, "whites+ should brighten near-white");
+    }
+
+    #[test]
+    fn saturation_scales_chroma() {
+        let color = [0.7, 0.4, 0.4]; // reddish
+        let grey = apply_saturation(color, -1.0, 0.0);
+        assert!(
+            (grey[0] - grey[1]).abs() < 1e-4 && (grey[1] - grey[2]).abs() < 1e-4,
+            "full -saturation collapses to grey"
+        );
+        let boosted = apply_saturation(color, 0.5, 0.0);
+        assert!(
+            boosted[0] - boosted[1] > color[0] - color[1],
+            "saturation+ widens chroma"
+        );
+    }
+
+    #[test]
+    fn vibrance_favors_unsaturated_pixels() {
+        // Same vibrance scales a muted pixel's chroma more than a vivid one's.
+        let muted = [0.55, 0.45, 0.45];
+        let vivid = [0.70, 0.20, 0.20];
+        let m = apply_saturation(muted, 0.0, 1.0);
+        let v = apply_saturation(vivid, 0.0, 1.0);
+        let ratio_m = (m[0] - m[1]) / (muted[0] - muted[1]);
+        let ratio_v = (v[0] - v[1]) / (vivid[0] - vivid[1]);
+        assert!(ratio_m > ratio_v, "vibrance lifts muted ({ratio_m}) more than vivid ({ratio_v})");
     }
 }

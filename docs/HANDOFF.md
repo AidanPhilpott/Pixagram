@@ -7,11 +7,11 @@
 
 **Last updated:** 2026-06-29 (session 4)
 **Current phase:** Phase 2 (Full adjustment pipeline) — **IN PROGRESS.** Phase 1 is
-COMPLETE/color-verified/tagged `v0.1.0`. Committed: step 1 (**contrast**, `a9a3beb`)
-and step 2 (**white balance**, `261c468`), both verified in the app. Step 3 (**tone
-regions — highlights/shadows/whites/blacks**) is built across the three lockstep
-files; frontend builds, 11/11 Rust tests pass. **Awaiting human verification of the
-four tone sliders before committing step 3 and starting step 4 (vibrance/saturation).**
+COMPLETE/color-verified/tagged `v0.1.0`. Committed: step 1 (**contrast**, `a9a3beb`),
+step 2 (**white balance**, `261c468`), step 3 (**tone regions**, `68bfeb8`) — all
+verified in the app. Step 4 (**vibrance/saturation**) is built across the three
+lockstep files; frontend builds, 13/13 Rust tests pass. **Awaiting human verification
+of the vibrance/saturation sliders before committing step 4 and starting step 5 (HSL).**
 **Branch:** `master` (local-only, no remote) · **Last tag:** `v0.1.0`
 
 > **Color-profile / "Fuji recipe" feature → decided: belongs in Phase 3 (Presets).**
@@ -40,14 +40,15 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — continue Phase 2 (step 4: vibrance/saturation)
+## ⚠️ START HERE NEXT SESSION — continue Phase 2 (step 5: HSL)
 
-Steps 1–3 are built. **Next action: human-verify the four tone sliders on a real
-RAF, commit step 3, then build step 4 — vibrance + saturation** following the same
-recipe (Rust `apply_pixel` + GLSL shader + TS mirror + slider, together). Sliders are
-now **config-driven**: add a field to `Adjustments` (Rust + TS), the shader math, and
-one row to the `SLIDERS` array in App.tsx — no per-control JSX. Saturation/vibrance
-will need a luminance + per-pixel saturation calc (new vs the per-channel tone ops).
+Steps 1–4 are built. **Next action: human-verify the vibrance/saturation sliders on
+a real RAF, commit step 4, then build step 5 — per-channel HSL** (hue/sat/luminance
+for ~8 color bands). HSL is the biggest op so far: it needs an RGB↔HSL conversion in
+both Rust and GLSL and a per-band weighting by hue — and the simple one-slider-per-
+field `SLIDERS` table won't fit a 3-axis × 8-band grid, so the inspector will need a
+small structural addition (grouped controls / band selector), not just more rows.
+Everything before HSL is single-scalar fields via the `SLIDERS` array.
 
 **WB design (decided this session):** temp/tint is a **relative, luminance-preserving
 chroma shift on the developed image** (chosen over a true raw Kelvin WB, which would
@@ -56,7 +57,17 @@ Lightroom treats non-raw files. The develop's base-color accuracy (single D65 ma
 illuminant interpolation) is a **separate** develop-side task, unaffected by — and not
 fixed by — this slider. See "Open risks".
 
-### What landed in step 3 (tone regions) — pending verify + commit
+### What landed in step 4 (vibrance/saturation) — pending verify + commit
+- `saturation` + `vibrance` fields (Rust + TS), default 0, UI [-100,+100]. First
+  **cross-channel** op: runs on the whole RGB triple at the **end** of the perceptual
+  chain (after contrast). Scales each pixel's chroma around its own luma —
+  `mix(luma, rgb, factor)` where `factor = (1+saturation)·(1+vibrance·(1−pixelSat))`,
+  so vibrance lifts muted colors more than vivid ones. Mirrored in Rust
+  `apply_saturation` / GLSL `applySaturation`. 2 unit tests.
+- Required restructuring `apply_pixel` to apply this on the full triple after the
+  per-channel loop (the earlier ops are per-channel; this one isn't).
+
+### What landed in step 3 (tone regions)
 - `highlights` / `shadows` / `whites` / `blacks` fields (Rust + TS), default 0, UI
   [-100,+100]. Applied on the perceptual value **after the encode, before contrast**,
   per channel: each control owns a `smoothstep`-weighted band (highlights 0.4–0.9,

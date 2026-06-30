@@ -7,6 +7,23 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-29 (session 4d) — Phase 2 step 4: vibrance/saturation
+
+- Committed step 3 (tone regions) as `68bfeb8` after the user verified the four
+  sliders in the app.
+- **Step 4 op = saturation + vibrance.** Added two fields + sliders. First
+  cross-channel op: applied on the whole RGB triple at the end of the perceptual
+  chain (after contrast), scaling chroma around each pixel's luma —
+  `mix(luma, rgb, (1+sat)·(1+vib·(1−pixelSat)))`. Vibrance's `(1−pixelSat)` weight
+  makes it favor muted colors. Rust `apply_saturation` ↔ GLSL `applySaturation`.
+  Restructured `apply_pixel` to apply it after the per-channel loop. 2 unit tests.
+- **Verified:** `npm run build` clean; `cargo test --lib` 13/13. Pending human eyeball.
+
+**Next:** verify → commit → step 5 (HSL — the big one: RGB↔HSL + per-hue bands +
+inspector restructure for a 3-axis × ~8-band grid).
+
+---
+
 ## 2026-06-29 (session 4c) — Phase 2 step 3: tone regions
 
 - Committed step 2 (WB) as `261c468` after the user verified temp/tint in the app.

@@ -32,6 +32,10 @@ export interface Adjustments {
   whites: number;
   /** Blacks in [-1, 1]. 0 = unchanged; + lifts / - crushes near-black. UI [-100, +100]. */
   blacks: number;
+  /** Saturation in [-1, 1]. 0 = unchanged; -1 greyscale, +1 doubles chroma. UI [-100, +100]. */
+  saturation: number;
+  /** Vibrance in [-1, 1]. 0 = unchanged; like saturation, weighted to muted colors. UI [-100, +100]. */
+  vibrance: number;
 }
 
 /** The neutral stack — equivalent to Rust's `Adjustments::default()`. */
@@ -45,6 +49,8 @@ export function defaultAdjustments(): Adjustments {
     shadows: 0,
     whites: 0,
     blacks: 0,
+    saturation: 0,
+    vibrance: 0,
   };
 }
 
@@ -59,3 +65,6 @@ export const WB_RANGE = { min: -1, max: 1, step: 0.01 } as const;
 
 /** UI bounds for the tone-region sliders (stored in [-1, 1]). */
 export const TONE_RANGE = { min: -1, max: 1, step: 0.01 } as const;
+
+/** UI bounds for the saturation/vibrance sliders (stored in [-1, 1]). */
+export const COLOR_RANGE = { min: -1, max: 1, step: 0.01 } as const;

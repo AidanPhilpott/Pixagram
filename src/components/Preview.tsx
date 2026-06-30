@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { PreviewRenderer } from "../gl/PreviewRenderer";
 import type { PreviewPayload } from "../lib/ipc";
+import type { Adjustments } from "../adjustments/definition";
 
 interface PreviewProps {
   preview: PreviewPayload | null;
-  exposure: number;
+  adjustments: Adjustments;
   loading: boolean;
 }
 
-/** WebGL live preview. Re-renders on exposure change without re-decoding. */
-export function Preview({ preview, exposure, loading }: PreviewProps) {
+/** WebGL live preview. Re-renders on adjustment change without re-decoding. */
+export function Preview({ preview, adjustments, loading }: PreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<PreviewRenderer | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,18 +36,18 @@ export function Preview({ preview, exposure, loading }: PreviewProps) {
     const img = new Image();
     img.onload = () => {
       renderer.setImage(img);
-      renderer.setExposure(exposure);
+      renderer.setAdjustments(adjustments);
     };
     img.onerror = () => setError("Failed to load decoded preview image.");
     img.src = preview.dataUrl;
-    // exposure intentionally omitted: re-uploading on every slider tick is wasteful.
+    // adjustments intentionally omitted: re-uploading on every slider tick is wasteful.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview]);
 
-  // Cheap GPU-only update on exposure change.
+  // Cheap GPU-only update on any adjustment change.
   useEffect(() => {
-    rendererRef.current?.setExposure(exposure);
-  }, [exposure]);
+    rendererRef.current?.setAdjustments(adjustments);
+  }, [adjustments]);
 
   return (
     <div className="preview">

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ThumbnailGrid } from "./components/ThumbnailGrid";
 import { Preview } from "./components/Preview";
-import { ExposureSlider } from "./components/ExposureSlider";
+import { AdjustmentSlider } from "./components/AdjustmentSlider";
 import {
   decodePreview,
   exportStub,
@@ -10,7 +10,12 @@ import {
   type ImageEntry,
   type PreviewPayload,
 } from "./lib/ipc";
-import { defaultAdjustments, type Adjustments } from "./adjustments/definition";
+import {
+  CONTRAST_RANGE,
+  EXPOSURE_RANGE,
+  defaultAdjustments,
+  type Adjustments,
+} from "./adjustments/definition";
 
 export function App() {
   const [entries, setEntries] = useState<ImageEntry[]>([]);
@@ -79,12 +84,14 @@ export function App() {
     }
   }, []);
 
-  const handleExposure = useCallback(
-    (ev: number) => {
+  // Update a single field of the selected photo's stack. One handler scales to
+  // every Phase 2 adjustment instead of a bespoke setter per slider.
+  const updateField = useCallback(
+    <K extends keyof Adjustments>(field: K, value: Adjustments[K]) => {
       if (!selectedId) return;
       setStacks((prev) => ({
         ...prev,
-        [selectedId]: { ...(prev[selectedId] ?? defaultAdjustments()), exposure: ev },
+        [selectedId]: { ...(prev[selectedId] ?? defaultAdjustments()), [field]: value },
       }));
     },
     [selectedId]
@@ -131,17 +138,36 @@ export function App() {
         </aside>
 
         <section className="stage">
-          <Preview preview={preview} exposure={adjustments.exposure} loading={previewLoading} />
+          <Preview preview={preview} adjustments={adjustments} loading={previewLoading} />
         </section>
 
         <aside className="inspector">
           <h2 className="inspector__title">
             {selected ? selected.fileName : "Adjustments"}
           </h2>
-          <ExposureSlider
+          <AdjustmentSlider
+            id="exposure"
+            label="Exposure"
             value={adjustments.exposure}
+            min={EXPOSURE_RANGE.min}
+            max={EXPOSURE_RANGE.max}
+            step={EXPOSURE_RANGE.step}
+            defaultValue={0}
             disabled={!selected}
-            onChange={handleExposure}
+            onChange={(v) => updateField("exposure", v)}
+            format={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)} EV`}
+          />
+          <AdjustmentSlider
+            id="contrast"
+            label="Contrast"
+            value={adjustments.contrast}
+            min={CONTRAST_RANGE.min}
+            max={CONTRAST_RANGE.max}
+            step={CONTRAST_RANGE.step}
+            defaultValue={0}
+            disabled={!selected}
+            onChange={(v) => updateField("contrast", v)}
+            format={(v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`}
           />
           {status && <div className="inspector__status">{status}</div>}
         </aside>

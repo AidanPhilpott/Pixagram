@@ -18,12 +18,17 @@
 export interface Adjustments {
   /** Exposure compensation in stops (EV). 0 = unchanged. UI range ~[-5, +5]. */
   exposure: number;
+  /** Contrast in [-1, 1]. 0 = unchanged. Shown to the user as [-100, +100]. */
+  contrast: number;
 }
 
 /** The neutral stack — equivalent to Rust's `Adjustments::default()`. */
 export function defaultAdjustments(): Adjustments {
-  return { exposure: 0 };
+  return { exposure: 0, contrast: 0 };
 }
 
 /** UI bounds for the exposure slider (stops). Tunable constant, not architecture. */
 export const EXPOSURE_RANGE = { min: -5, max: 5, step: 0.01 } as const;
+
+/** UI bounds for the contrast slider (stored in [-1, 1]). */
+export const CONTRAST_RANGE = { min: -1, max: 1, step: 0.01 } as const;

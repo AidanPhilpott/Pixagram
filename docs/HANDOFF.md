@@ -5,12 +5,21 @@
 > dated entry to [PROGRESS.md](PROGRESS.md) for the running history, and add any
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
-**Last updated:** 2026-06-29 (end of session 3)
-**Current phase:** Phase 1 (Skeleton) — **COMPLETE, color-verified, tagged
-`v0.1.0`** (commit `676b874`). The green-cast bug is fixed via the owned develop
-pipeline; confirmed correct in the running app on real X-T5 frames (cityscape +
-windowsill plant). **Next session: begin Phase 2.**
+**Last updated:** 2026-06-29 (session 4)
+**Current phase:** Phase 2 (Full adjustment pipeline) — **IN PROGRESS.** Phase 1 is
+COMPLETE/color-verified/tagged `v0.1.0`. Phase 2 step 1 (**contrast**) is built
+across the three lockstep files + the slider plumbing was generalized; frontend
+builds and all 4 Rust tests pass. **Awaiting human verification of the contrast
+slider in the running app before step 2 (white balance temp/tint).**
 **Branch:** `master` (local-only, no remote) · **Last tag:** `v0.1.0`
+
+> **Color-profile / "Fuji recipe" feature → decided: belongs in Phase 3 (Presets).**
+> A profile = a saved `Adjustments` value (JSON). Recommended model is **(A)** a
+> named, editable bundle of the same sliders (honors the single-shared-definition
+> constraint + the "don't reproduce Fuji recipes" non-goal), **not (B)** a base
+> LUT/film-sim layer beneath the sliders. Settle A-vs-B when Phase 3 starts. Phase 2
+> carry-forward: keep every new field `#[serde(default)]` so profiles save/load for
+> free. See "Open risks" + PROGRESS 2026-06-29 (session 4).
 
 ---
 
@@ -30,15 +39,40 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — begin Phase 2
+## ⚠️ START HERE NEXT SESSION — continue Phase 2 (step 2: white balance)
 
-Phase 1 is done and tagged `v0.1.0`. The green-cast bug is fixed (chose
-original-decision option 2: **own the color pipeline**; root cause turned out to be
-rawler's *demosaic*, not WB — see below). App verified by the user. **Next action:
-start Phase 2 — see "What's next" below; grow the shared adjustment definition one
-op at a time. The Phase-2 color follow-ups (full-res export demosaic, tone curve to
-replace `BASELINE_EXPOSURE_EV`, illuminant interpolation) are listed under "Open
-risks."** Context on the fix that just landed:
+Phase 2 step 1 (**contrast**) landed this session. **Next action: human-verify the
+contrast slider on a real RAF in the running app, then build step 2 — white balance
+(temp/tint)** following the same one-op-at-a-time recipe (Rust `apply_pixel` + GLSL
+shader + TS mirror + slider, together). The plumbing is now generalized so each new
+op is: add a field to `Adjustments` (Rust + TS), one shader line, one
+`<AdjustmentSlider>` in App.tsx wired through `updateField`. WB will also need the
+illuminant-interpolation follow-up (single D65 matrix today — see "Open risks").
+
+### What landed in step 1 (contrast)
+- `contrast: f32` field added to `Adjustments` (Rust + TS mirror), default 0, UI
+  range [-1,1] shown as [-100,+100]. **Perceptual S-curve** pivoting at mid-grey
+  0.5: positive blends toward `smoothstep` (steeper mid-tones), negative compresses
+  toward mid. Applied on the gamma-encoded value *after* the linear→sRGB encode
+  (exposure stays in linear light). Mirrored in Rust `apply_contrast` and GLSL
+  `contrastCurve` — **edit both together.** 3 unit tests (positive pushes from mid,
+  full negative compresses without collapsing, mid-grey is a fixed point).
+- Switched from the initial linear-pivot scaling to the S-curve this session (it
+  crushed shadows / blew highlights). The pipeline doc-order in `adjustments.rs` was
+  updated to match (contrast is now step 4, on the perceptual value).
+- **Plumbing generalized** (enabling refactor, not a new op): `PreviewRenderer` now
+  takes the whole stack via `setAdjustments(adj)` instead of `setExposure`; `Preview`
+  takes an `adjustments` prop; `App` has one generic `updateField(field, value)`
+  setter; `ExposureSlider` replaced by a reusable `AdjustmentSlider`.
+- Preview is still **8-bit** — the S-curve shoulder/toe will band a little under
+  hard pushes until the float-preview step (Phase 2 item 3). Shape is right; defer
+  polish until then.
+
+### Phase 1 context (still relevant)
+The green-cast bug was fixed by owning the color pipeline (root cause: rawler's
+*demosaic*, not WB — details below). The Phase-2 color follow-ups (full-res export
+demosaic, tone curve to replace `BASELINE_EXPOSURE_EV`, illuminant interpolation)
+are under "Open risks." Context on the develop fix:
 
 **What was actually wrong (corrected diagnosis — supersedes old notes):**
 - The cast was rawler 0.7.2's **X-Trans demosaic** inflating green ~1.8× (the
@@ -96,6 +130,16 @@ sliders. Concretely, the first moves:
    adjustments (see INSIGHTS).
 
 ## Open risks / decisions to make
+- **Color profiles / "Fuji recipes" → Phase 3 (Presets).** Decided this session: a
+  profile is a saved `Adjustments` JSON value. Build model **(A)** — a named,
+  editable bundle of the existing sliders + a handful of built-in defaults + "save
+  current as profile" + batch-apply — which is exactly the README's Phase 3 preset
+  scope. Reject/deferred: **(B)** a true LUT / base film-sim layer beneath the
+  sliders (adds a 2nd color stage to preview+export; the README lists reproducing
+  Fuji recipes as a non-goal). Settle A-vs-B explicitly when Phase 3 opens. Profiles
+  are only as expressive as the Phase 2 slider vocabulary, so finish the WB / tone /
+  HSL ops first. **Carry-forward: keep every new `Adjustments` field
+  `#[serde(default)]` so old profile JSON keeps loading as the struct grows.**
 - **EXIF policy on export** (Phase 5): preserve / strip / preserve-minus-GPS — not
   yet decided. Flag to the user when Phase 5 starts.
 - **Export-quality demosaic.** The owned develop uses area-averaging (great for the

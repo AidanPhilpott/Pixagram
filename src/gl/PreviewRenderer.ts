@@ -7,14 +7,16 @@
  */
 import { VERTEX_SHADER } from "./preview.vert";
 import { FRAGMENT_SHADER } from "./preview.frag";
+import { defaultAdjustments, type Adjustments } from "../adjustments/definition";
 
 export class PreviewRenderer {
   private gl: WebGLRenderingContext;
   private program: WebGLProgram;
   private texture: WebGLTexture | null = null;
   private uExposure: WebGLUniformLocation | null;
+  private uContrast: WebGLUniformLocation | null;
   private hasImage = false;
-  private exposure = 0;
+  private adjustments: Adjustments = defaultAdjustments();
 
   constructor(private canvas: HTMLCanvasElement) {
     const gl = canvas.getContext("webgl", {
@@ -50,6 +52,7 @@ export class PreviewRenderer {
     gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
 
     this.uExposure = gl.getUniformLocation(this.program, "uExposure");
+    this.uContrast = gl.getUniformLocation(this.program, "uContrast");
     gl.uniform1i(gl.getUniformLocation(this.program, "uImage"), 0);
   }
 
@@ -74,9 +77,9 @@ export class PreviewRenderer {
     this.render();
   }
 
-  /** Update exposure (EV) from the shared adjustment definition and redraw. */
-  setExposure(ev: number): void {
-    this.exposure = ev;
+  /** Push the whole adjustment stack into the shader uniforms and redraw. */
+  setAdjustments(adj: Adjustments): void {
+    this.adjustments = adj;
     this.render();
   }
 
@@ -86,7 +89,8 @@ export class PreviewRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
     if (!this.hasImage) return;
     gl.useProgram(this.program);
-    gl.uniform1f(this.uExposure, this.exposure);
+    gl.uniform1f(this.uExposure, this.adjustments.exposure);
+    gl.uniform1f(this.uContrast, this.adjustments.contrast);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.drawArrays(gl.TRIANGLES, 0, 6);

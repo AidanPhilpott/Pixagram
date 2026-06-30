@@ -272,6 +272,10 @@ body {
   border-radius: var(--radius-sm);
   padding: 12px;
 }
+/* Breathing room between stacked adjustment cards (scales to every slider). */
+.control + .control {
+  margin-top: 12px;
+}
 .control__head {
   display: flex;
   align-items: center;

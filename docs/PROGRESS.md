@@ -7,6 +7,43 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-29 (session 4) — Phase 2 kickoff: contrast + generalized plumbing
+
+Began Phase 2 (full adjustment pipeline). Also settled where the user's
+**color-profile / "Fuji recipe"** feature belongs.
+
+- **Color-profile placement → Phase 3 (Presets).** It maps onto the README's
+  existing "save the stack as a named preset; apply to one/many; manage a library
+  (JSON)" scope. Model **(A)**: a profile = a saved `Adjustments` value — a named,
+  editable bundle of the same sliders + built-in defaults + batch-apply. Rejected
+  **(B)**: a real LUT / base film-sim layer beneath the sliders (second color stage
+  in preview+export; README non-goal). A-vs-B to be confirmed when Phase 3 opens.
+  Carry-forward into Phase 2: keep every new field `#[serde(default)]` so profiles
+  serialize/deserialize for free. Logged in HANDOFF open-risks + a memory note.
+- **Step 1 op = contrast.** Added `contrast: f32` to the canonical struct
+  (`adjustments.rs`), the GLSL shader (`preview.frag.ts`), and the TS mirror
+  (`definition.ts`) together. UI range [-1,1], shown as [-100,+100]. First shipped a
+  linear-light pivot scale; after eyeballing it (crushed shadows / blew highlights)
+  **switched to a perceptual S-curve** pivoting at mid-grey 0.5 — positive blends
+  toward `smoothstep`, negative compresses toward mid. Applied on the gamma-encoded
+  value after the linear→sRGB encode; exposure stays linear. Rust `apply_contrast`
+  ↔ GLSL `contrastCurve` kept identical. 3 unit tests.
+  - Gotcha: a backtick inside a GLSL `//` comment (`` `apply_contrast` ``) silently
+    terminated the shader's template literal and broke the TS parse — keep backticks
+    out of the shader string.
+- **Enabling refactor (no behaviour change to exposure).** Generalized the preview
+  plumbing so the remaining five ops are cheap: `PreviewRenderer.setAdjustments(adj)`
+  (whole stack → uniforms) replaces `setExposure`; `Preview` takes an `adjustments`
+  prop; `App` has one generic `updateField(field, value)`; `ExposureSlider` →
+  reusable `AdjustmentSlider`. Each future op is now field + shader line + slider row.
+- **Verified:** `npm run build` clean (tsc + vite, 42 modules); `cargo test --lib`
+  all 4 pass. Not yet eyeballed in the running app — that's the next gate.
+
+**Next:** human-verify the contrast slider on a real RAF, then step 2 = white
+balance (temp/tint), which also pulls in the deferred illuminant-interpolation work.
+
+---
+
 ## 2026-06-29 (session 3) — green cast root-caused + fixed (owned develop)
 
 Settled the color decision by **re-diagnosing from scratch**, which overturned the

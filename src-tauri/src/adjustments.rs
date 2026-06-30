@@ -17,14 +17,17 @@
 //!
 //! ## Pipeline (the order operations are applied)
 //!
-//! Phase 1 has exactly one operation — exposure — applied in **linear light**:
+//! Tone operations run in **linear light**; the perceptual contrast curve runs
+//! on the gamma-encoded value (where contrast feels natural). Pipeline order:
 //!
 //! 1. Decode the stored pixel from sRGB gamma to linear.
-//! 2. Multiply linear RGB by the exposure gain `2^EV`.
+//! 2. **Exposure** — multiply linear RGB by the gain `2^EV` (linear light).
 //! 3. Re-encode linear back to sRGB gamma and clip to [0, 1].
+//! 4. **Contrast** — an S-curve around perceptual mid-grey (0.5) on that value.
 //!
-//! Later phases insert contrast, white balance, tone curve, HSL, etc. into this
-//! same linear-light pipeline, all driven by additional fields on `Adjustments`.
+//! Later phases insert white balance, highlights/shadows, tone curve, HSL, etc.
+//! into this pipeline, all driven by additional fields on `Adjustments`. Order
+//! matters and is the contract — keep it identical here and in the GLSL shader.
 
 use serde::{Deserialize, Serialize};
 
@@ -39,11 +42,19 @@ pub struct Adjustments {
     /// Exposure compensation in stops (EV). 0.0 = unchanged. Range checked by the
     /// UI to roughly [-5, +5]; the math itself is unbounded.
     pub exposure: f32,
+    /// Contrast amount in [-1.0, +1.0]. 0.0 = unchanged; positive applies an
+    /// S-curve around perceptual mid-grey (steepening mid-tones), negative
+    /// compresses tones toward mid-grey. The UI shows this as a familiar
+    /// [-100, +100].
+    pub contrast: f32,
 }
 
 impl Default for Adjustments {
     fn default() -> Self {
-        Self { exposure: 0.0 }
+        Self {
+            exposure: 0.0,
+            contrast: 0.0,
+        }
     }
 }
 
@@ -67,6 +78,32 @@ fn linear_to_srgb(c: f32) -> f32 {
     }
 }
 
+/// Hermite smoothstep on a clamped [0,1] input — the S used by contrast.
+/// Mirrors GLSL `smoothstep(0.0, 1.0, v)` exactly.
+#[inline]
+fn smoothstep01(v: f32) -> f32 {
+    let v = v.clamp(0.0, 1.0);
+    v * v * (3.0 - 2.0 * v)
+}
+
+/// Apply the contrast S-curve to one perceptual (gamma-encoded) channel value.
+///
+/// Pivots at perceptual mid-grey (0.5), which is a fixed point at every amount.
+/// Positive blends toward an S (steeper mid-tones); negative blends toward a
+/// half-slope line (tones compressed toward mid). Monotonic on `[-1, 1]`.
+/// **Mirror of `contrastCurve` in the GLSL shader — edit both together.**
+#[inline]
+fn apply_contrast(v: f32, c: f32) -> f32 {
+    if c >= 0.0 {
+        // mix(v, smoothstep(v), c)
+        v + (smoothstep01(v) - v) * c
+    } else {
+        // mix(v, 0.5 + (v - 0.5) * 0.5, -c)
+        let soft = 0.5 + (v - 0.5) * 0.5;
+        v + (soft - v) * (-c)
+    }
+}
+
 /// Apply the full adjustment stack to a single sRGB-encoded RGB pixel.
 ///
 /// Input and output channels are normalized to `0.0..=1.0`. This is the Rust
@@ -77,8 +114,11 @@ pub fn apply_pixel(adj: &Adjustments, rgb: [f32; 3]) -> [f32; 3] {
     let gain = 2.0_f32.powf(adj.exposure);
     let mut out = [0.0_f32; 3];
     for i in 0..3 {
+        // Exposure in linear light, then encode to the perceptual domain.
         let lin = srgb_to_linear(rgb[i]) * gain;
-        out[i] = linear_to_srgb(lin).clamp(0.0, 1.0);
+        let v = linear_to_srgb(lin).clamp(0.0, 1.0);
+        // Contrast S-curve on the perceptual value.
+        out[i] = apply_contrast(v, adj.contrast).clamp(0.0, 1.0);
     }
     out
 }
@@ -100,10 +140,41 @@ mod tests {
     #[test]
     fn plus_one_stop_doubles_linear_midtone() {
         // A mid-grey at +1 EV should roughly double in linear light.
-        let adj = Adjustments { exposure: 1.0 };
+        let adj = Adjustments { exposure: 1.0, ..Default::default() };
         let mid = 0.5_f32;
         let out = apply_pixel(&adj, [mid, mid, mid]);
         let expected = linear_to_srgb((srgb_to_linear(mid) * 2.0).min(1.0));
         assert!((out[0] - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn positive_contrast_pushes_away_from_midgrey() {
+        // Above mid brightens, below mid darkens (perceptual S-curve).
+        let adj = Adjustments { contrast: 0.5, ..Default::default() };
+        let hi = apply_pixel(&adj, [0.8, 0.8, 0.8]);
+        let lo = apply_pixel(&adj, [0.1, 0.1, 0.1]);
+        assert!(hi[0] > 0.8, "highlight should brighten, got {}", hi[0]);
+        assert!(lo[0] < 0.1, "shadow should darken, got {}", lo[0]);
+    }
+
+    #[test]
+    fn negative_contrast_compresses_toward_mid() {
+        // Full negative contrast pulls extremes toward perceptual mid-grey
+        // without collapsing them to a single value.
+        let adj = Adjustments { contrast: -1.0, ..Default::default() };
+        let black = apply_pixel(&adj, [0.0; 3]);
+        let white = apply_pixel(&adj, [1.0; 3]);
+        assert!(black[0] > 0.0 && black[0] < 0.5, "black lifted, got {}", black[0]);
+        assert!(white[0] < 1.0 && white[0] > 0.5, "white pulled, got {}", white[0]);
+    }
+
+    #[test]
+    fn mid_grey_is_the_contrast_pivot() {
+        // Perceptual mid-grey (0.5) is a fixed point at every contrast amount.
+        for c in [-1.0, -0.3, 0.3, 1.0] {
+            let adj = Adjustments { contrast: c, ..Default::default() };
+            let out = apply_pixel(&adj, [0.5; 3]);
+            assert!((out[0] - 0.5).abs() < 1e-4, "mid-grey moved at c={c}: {}", out[0]);
+        }
     }
 }

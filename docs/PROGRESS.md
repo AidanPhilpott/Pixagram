@@ -7,6 +7,29 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-29 (session 4e) — Phase 2 step 5: HSL (per-hue bands)
+
+- Committed step 4 (vibrance/saturation) as `108d5e7` after user verification.
+- **Step 5 op = HSL.** New `HslBand {hue,sat,lum}` + `hsl: [HslBand;8]` on the
+  struct (8 named hue bands). Math: RGB→HSL, blend the two bands bracketing the pixel
+  hue (8-way segment, identical Rust/GLSL), apply hue rotation / sat scale / lightness
+  shift gated by `smoothstep(0,0.15,sat)` so neutrals are untouched, HSL→RGB. Rust
+  `apply_hsl` ↔ GLSL `applyHsl`. Runs last in the chain.
+  - **WebGL1 constraint:** GLSL ES 1.00 — no array constructors, limited dynamic
+    indexing. Band blend = 8-way if/else over constant indices into `uHsl*[8]` uniform
+    arrays. `uHslActive` uniform skips HSL entirely (incl. the rgb↔hsl round-trip) when
+    all bands neutral, matching the Rust early-out → all-zero HSL is exact identity.
+- **UI:** chose band-selector layout (user pick): new `HslPanel` with 8 color swatches
+  + Hue/Sat/Luminance sliders for the selected band; edited bands get a dot. `App`
+  gained `updateHslBand`; `SLIDERS` config retyped to scalar fields only.
+- **Verified:** `npm run build` clean; `cargo test --lib` 15/15 (added rgb↔hsl
+  round-trip + red-band-targets-reds). Pending human eyeball.
+
+**Next:** verify → commit → step 6 (tone curve — last core op), then Phase-2 hardening
+(ts-rs, 16-bit preview), then tag and Phase 3.
+
+---
+
 ## 2026-06-29 (session 4d) — Phase 2 step 4: vibrance/saturation
 
 - Committed step 3 (tone regions) as `68bfeb8` after the user verified the four

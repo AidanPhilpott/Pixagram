@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { ThumbnailGrid } from "./components/ThumbnailGrid";
 import { Preview } from "./components/Preview";
 import { AdjustmentSlider } from "./components/AdjustmentSlider";
+import { HslPanel } from "./components/HslPanel";
 import {
   decodePreview,
   exportStub,
@@ -18,14 +19,20 @@ import {
   WB_RANGE,
   defaultAdjustments,
   type Adjustments,
+  type HslBand,
 } from "./adjustments/definition";
 
 /** Compact readout shared by all unit-less [-1,1] sliders (shown as [-100,+100]). */
 const asPercent = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`;
 
-/** Inspector slider rows, in display order. One row per `Adjustments` field. */
+/** The scalar (single-number) fields of `Adjustments` — i.e. everything but `hsl`. */
+type ScalarField = {
+  [K in keyof Adjustments]: Adjustments[K] extends number ? K : never;
+}[keyof Adjustments];
+
+/** Inspector slider rows, in display order. One row per scalar `Adjustments` field. */
 const SLIDERS: ReadonlyArray<{
-  field: keyof Adjustments;
+  field: ScalarField;
   label: string;
   range: { min: number; max: number; step: number };
   format: (v: number) => string;
@@ -122,6 +129,19 @@ export function App() {
     [selectedId]
   );
 
+  // Update one field of one HSL band, leaving the other 7 bands untouched.
+  const updateHslBand = useCallback(
+    (index: number, field: keyof HslBand, value: number) => {
+      if (!selectedId) return;
+      setStacks((prev) => {
+        const current = prev[selectedId] ?? defaultAdjustments();
+        const hsl = current.hsl.map((b, i) => (i === index ? { ...b, [field]: value } : b));
+        return { ...prev, [selectedId]: { ...current, hsl } };
+      });
+    },
+    [selectedId]
+  );
+
   const handleExport = useCallback(async () => {
     if (!selected) return;
     try {
@@ -185,6 +205,7 @@ export function App() {
               format={s.format}
             />
           ))}
+          <HslPanel bands={adjustments.hsl} disabled={!selected} onChange={updateHslBand} />
           {status && <div className="inspector__status">{status}</div>}
         </aside>
       </main>

@@ -23,6 +23,14 @@ export class PreviewRenderer {
   private uBlacks: WebGLUniformLocation | null;
   private uSaturation: WebGLUniformLocation | null;
   private uVibrance: WebGLUniformLocation | null;
+  private uHslHue: WebGLUniformLocation | null;
+  private uHslSat: WebGLUniformLocation | null;
+  private uHslLum: WebGLUniformLocation | null;
+  private uHslActive: WebGLUniformLocation | null;
+  // Reused scratch buffers so per-frame uniform uploads don't allocate.
+  private hslHue = new Float32Array(8);
+  private hslSat = new Float32Array(8);
+  private hslLum = new Float32Array(8);
   private hasImage = false;
   private adjustments: Adjustments = defaultAdjustments();
 
@@ -69,6 +77,10 @@ export class PreviewRenderer {
     this.uBlacks = gl.getUniformLocation(this.program, "uBlacks");
     this.uSaturation = gl.getUniformLocation(this.program, "uSaturation");
     this.uVibrance = gl.getUniformLocation(this.program, "uVibrance");
+    this.uHslHue = gl.getUniformLocation(this.program, "uHslHue");
+    this.uHslSat = gl.getUniformLocation(this.program, "uHslSat");
+    this.uHslLum = gl.getUniformLocation(this.program, "uHslLum");
+    this.uHslActive = gl.getUniformLocation(this.program, "uHslActive");
     gl.uniform1i(gl.getUniformLocation(this.program, "uImage"), 0);
   }
 
@@ -115,6 +127,21 @@ export class PreviewRenderer {
     gl.uniform1f(this.uBlacks, this.adjustments.blacks);
     gl.uniform1f(this.uSaturation, this.adjustments.saturation);
     gl.uniform1f(this.uVibrance, this.adjustments.vibrance);
+
+    let hslActive = 0;
+    const hsl = this.adjustments.hsl;
+    for (let i = 0; i < 8; i++) {
+      const band = hsl[i] ?? { hue: 0, sat: 0, lum: 0 };
+      this.hslHue[i] = band.hue;
+      this.hslSat[i] = band.sat;
+      this.hslLum[i] = band.lum;
+      if (band.hue !== 0 || band.sat !== 0 || band.lum !== 0) hslActive = 1;
+    }
+    gl.uniform1fv(this.uHslHue, this.hslHue);
+    gl.uniform1fv(this.uHslSat, this.hslSat);
+    gl.uniform1fv(this.uHslLum, this.hslLum);
+    gl.uniform1f(this.uHslActive, hslActive);
+
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.drawArrays(gl.TRIANGLES, 0, 6);

@@ -311,6 +311,61 @@ body {
   cursor: default;
 }
 
+/* ── HSL panel ────────────────────────────────────────── */
+.hsl {
+  margin-top: 12px;
+}
+.hsl__head {
+  margin-bottom: 10px;
+}
+.hsl__head label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.hsl__swatches {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+.hsl__swatch {
+  appearance: none;
+  flex: 1;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3) inset;
+  cursor: pointer;
+  position: relative;
+  transition: transform 100ms ease, border-color 100ms ease;
+}
+.hsl__swatch:hover {
+  transform: translateY(-1px);
+}
+.hsl__swatch--active {
+  border-color: var(--text);
+}
+/* A dot marks bands that carry an edit. */
+.hsl__swatch--edited::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.hsl__band-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
 /* Range input */
 input[type="range"] {
   -webkit-appearance: none;

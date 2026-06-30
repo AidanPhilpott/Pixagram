@@ -30,12 +30,31 @@
 //! 6. **Contrast** — an S-curve around perceptual mid-grey (0.5) on that value.
 //! 7. **Saturation / vibrance** — scale each pixel's chroma (distance from its
 //!    grey/luma), across all three channels at once.
+//! 8. **HSL** — per-hue-band hue/saturation/luminance: convert to HSL, blend the
+//!    adjacent bands' adjustments at the pixel's hue, apply, convert back.
 //!
-//! Later phases insert tone curve, HSL, etc. into this pipeline, all driven by
-//! additional fields on `Adjustments`. Order matters and is the contract — keep
-//! it identical here and in the GLSL shader.
+//! Later phases insert the tone curve into this pipeline, driven by additional
+//! fields on `Adjustments`. Order matters and is the contract — keep it identical
+//! here and in the GLSL shader.
 
 use serde::{Deserialize, Serialize};
+
+/// One color band of the HSL panel — hue rotation, saturation, and luminance,
+/// each in `[-1.0, +1.0]` (0 = unchanged). There are 8 bands (see `HSL_BANDS` in
+/// the TS mirror); a pixel blends the two whose hues bracket its own.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct HslBand {
+    pub hue: f32,
+    pub sat: f32,
+    pub lum: f32,
+}
+
+impl Default for HslBand {
+    fn default() -> Self {
+        Self { hue: 0.0, sat: 0.0, lum: 0.0 }
+    }
+}
 
 /// A complete non-destructive adjustment stack for one photo.
 ///
@@ -79,6 +98,9 @@ pub struct Adjustments {
     /// `(1 - pixel saturation)`, so muted colors move more than already-vivid ones.
     /// UI shows [-100, +100].
     pub vibrance: f32,
+    /// Per-hue HSL adjustments, one entry per color band (red, orange, yellow,
+    /// green, aqua, blue, purple, magenta — centers in `hsl_band_adjust`).
+    pub hsl: [HslBand; 8],
 }
 
 impl Default for Adjustments {
@@ -94,9 +116,15 @@ impl Default for Adjustments {
             blacks: 0.0,
             saturation: 0.0,
             vibrance: 0.0,
+            hsl: [HslBand { hue: 0.0, sat: 0.0, lum: 0.0 }; 8],
         }
     }
 }
+
+/// Hue rotation (degrees) a full HSL hue slider applies. Tunable; match the shader.
+const HSL_HUE_DEG: f32 = 30.0;
+/// Lightness shift a full HSL luminance slider applies. Tunable; match the shader.
+const HSL_LUM_STRENGTH: f32 = 0.5;
 
 /// Full-scale per-channel chroma strength for temperature (R/B) and tint (G).
 /// Tunable constants, not architecture — but they MUST match the GLSL shader.
@@ -184,6 +212,105 @@ fn apply_saturation(rgb: [f32; 3], saturation: f32, vibrance: f32) -> [f32; 3] {
     ]
 }
 
+#[inline]
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// Convert a perceptual RGB pixel to HSL. Returns hue in degrees `[0, 360)`,
+/// saturation and lightness in `[0, 1]`. Mirror of GLSL `rgb2hsl`.
+#[inline]
+fn rgb_to_hsl(rgb: [f32; 3]) -> (f32, f32, f32) {
+    let (r, g, b) = (rgb[0], rgb[1], rgb[2]);
+    let maxc = r.max(g).max(b);
+    let minc = r.min(g).min(b);
+    let l = (maxc + minc) * 0.5;
+    let d = maxc - minc;
+    if d <= 1e-6 {
+        return (0.0, 0.0, l);
+    }
+    let s = d / (1.0 - (2.0 * l - 1.0).abs());
+    let mut h = if maxc == r {
+        (g - b) / d
+    } else if maxc == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    h = (h * 60.0).rem_euclid(360.0);
+    (h, s, l)
+}
+
+/// Convert HSL (hue degrees, sat, lightness) back to RGB. Mirror of GLSL `hsl2rgb`.
+#[inline]
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = h / 60.0;
+    let x = c * (1.0 - (hp.rem_euclid(2.0) - 1.0).abs());
+    let (r1, g1, b1) = if hp < 1.0 {
+        (c, x, 0.0)
+    } else if hp < 2.0 {
+        (x, c, 0.0)
+    } else if hp < 3.0 {
+        (0.0, c, x)
+    } else if hp < 4.0 {
+        (0.0, x, c)
+    } else if hp < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+    let m = l - c * 0.5;
+    [r1 + m, g1 + m, b1 + m]
+}
+
+/// Blend the two color bands whose centers bracket `h` (degrees), returning the
+/// interpolated (hue, sat, lum) adjustment. Band centers: red 0, orange 30,
+/// yellow 60, green 120, aqua 180, blue 240, purple 270, magenta 300 (wrapping
+/// 300→360 back to red). **Segment thresholds MUST match the GLSL shader.**
+#[inline]
+fn hsl_band_adjust(h: f32, hsl: &[HslBand; 8]) -> (f32, f32, f32) {
+    let (i0, i1, t) = if h < 30.0 {
+        (0, 1, h / 30.0)
+    } else if h < 60.0 {
+        (1, 2, (h - 30.0) / 30.0)
+    } else if h < 120.0 {
+        (2, 3, (h - 60.0) / 60.0)
+    } else if h < 180.0 {
+        (3, 4, (h - 120.0) / 60.0)
+    } else if h < 240.0 {
+        (4, 5, (h - 180.0) / 60.0)
+    } else if h < 270.0 {
+        (5, 6, (h - 240.0) / 30.0)
+    } else if h < 300.0 {
+        (6, 7, (h - 270.0) / 30.0)
+    } else {
+        (7, 0, (h - 300.0) / 60.0)
+    };
+    let (a, b) = (hsl[i0], hsl[i1]);
+    (lerp(a.hue, b.hue, t), lerp(a.sat, b.sat, t), lerp(a.lum, b.lum, t))
+}
+
+/// Apply the per-hue HSL adjustments to a perceptual RGB pixel. No-op when every
+/// band is neutral. Adjustments fade out on near-neutral pixels (no real hue).
+/// **Mirror of `applyHsl` in the GLSL shader.**
+#[inline]
+fn apply_hsl(rgb: [f32; 3], hsl: &[HslBand; 8]) -> [f32; 3] {
+    if hsl
+        .iter()
+        .all(|b| b.hue == 0.0 && b.sat == 0.0 && b.lum == 0.0)
+    {
+        return rgb;
+    }
+    let (h, s, l) = rgb_to_hsl(rgb);
+    let color_mask = smoothstep(0.0, 0.15, s);
+    let (dh, ds, dl) = hsl_band_adjust(h, hsl);
+    let h2 = (h + dh * HSL_HUE_DEG * color_mask).rem_euclid(360.0);
+    let s2 = (s * (1.0 + ds * color_mask)).clamp(0.0, 1.0);
+    let l2 = (l + dl * HSL_LUM_STRENGTH * color_mask).clamp(0.0, 1.0);
+    hsl_to_rgb(h2, s2, l2)
+}
+
 /// Rec.709 relative luminance of a linear-light RGB triple.
 #[inline]
 fn luminance(c: [f32; 3]) -> f32 {
@@ -256,7 +383,9 @@ pub fn apply_pixel(adj: &Adjustments, rgb: [f32; 3]) -> [f32; 3] {
         out[i] = apply_contrast(v, adj.contrast).clamp(0.0, 1.0);
     }
     // Saturation / vibrance — cross-channel, so it runs on the whole triple.
-    apply_saturation(out, adj.saturation, adj.vibrance)
+    let out = apply_saturation(out, adj.saturation, adj.vibrance);
+    // HSL — per-hue hue/sat/luminance.
+    apply_hsl(out, &adj.hsl)
 }
 
 #[cfg(test)]
@@ -399,5 +528,32 @@ mod tests {
         let ratio_m = (m[0] - m[1]) / (muted[0] - muted[1]);
         let ratio_v = (v[0] - v[1]) / (vivid[0] - vivid[1]);
         assert!(ratio_m > ratio_v, "vibrance lifts muted ({ratio_m}) more than vivid ({ratio_v})");
+    }
+
+    #[test]
+    fn rgb_hsl_round_trips() {
+        for px in [[0.8, 0.2, 0.2], [0.2, 0.6, 0.3], [0.3, 0.3, 0.9], [0.5; 3]] {
+            let (h, s, l) = rgb_to_hsl(px);
+            let back = hsl_to_rgb(h, s, l);
+            for i in 0..3 {
+                assert!((back[i] - px[i]).abs() < 1e-4, "round-trip drifted on {px:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn hsl_targets_only_the_matching_band() {
+        // Fully desaturate the red band; a red pixel goes grey, a blue one is left.
+        let mut hsl = [HslBand::default(); 8];
+        hsl[0].sat = -1.0; // red band
+        let adj = Adjustments { hsl, ..Default::default() };
+
+        let red = apply_pixel(&adj, [0.8, 0.2, 0.2]); // hue ~0
+        let red_spread = red[0].max(red[1]).max(red[2]) - red[0].min(red[1]).min(red[2]);
+        assert!(red_spread < 0.05, "red band should desaturate reds, got spread {red_spread}");
+
+        let blue = apply_pixel(&adj, [0.2, 0.2, 0.8]); // hue ~240
+        let blue_spread = blue[0].max(blue[1]).max(blue[2]) - blue[0].min(blue[1]).min(blue[2]);
+        assert!(blue_spread > 0.5, "blue should be untouched, got spread {blue_spread}");
     }
 }

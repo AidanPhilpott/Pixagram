@@ -7,7 +7,7 @@
  *
  * Pipeline: sRGB -> linear, exposure (2^EV), white balance (luminance-preserving
  * chroma shift), linear -> sRGB, tone regions (highlights/shadows/whites/blacks),
- * contrast (S-curve around mid-grey 0.5), saturation/vibrance, clip.
+ * contrast (S-curve around mid-grey 0.5), saturation/vibrance, HSL, clip.
  */
 export const FRAGMENT_SHADER = /* glsl */ `
 precision highp float;
@@ -24,12 +24,19 @@ uniform float uWhites;      // [-1, 1], tone region
 uniform float uBlacks;      // [-1, 1], tone region
 uniform float uSaturation;  // [-1, 1], chroma scale (uniform)
 uniform float uVibrance;    // [-1, 1], chroma scale (weighted to muted colors)
+uniform float uHslHue[8];   // per-band hue rotation [-1, 1]
+uniform float uHslSat[8];   // per-band saturation [-1, 1]
+uniform float uHslLum[8];   // per-band luminance [-1, 1]
+uniform float uHslActive;   // 1.0 if any HSL band is non-neutral, else 0.0
 
 // Full-scale chroma strengths — MUST match WB_*_STRENGTH in adjustments.rs.
 const float WB_TEMP_STRENGTH = 0.3;
 const float WB_TINT_STRENGTH = 0.3;
 // Full-scale tone-region lift — MUST match TONE_STRENGTH in adjustments.rs.
 const float TONE_STRENGTH = 0.2;
+// HSL slider strengths — MUST match HSL_*_STRENGTH/DEG in adjustments.rs.
+const float HSL_HUE_DEG = 30.0;
+const float HSL_LUM_STRENGTH = 0.5;
 
 // Per-channel sRGB <-> linear, matching the Rust implementation exactly.
 float srgbToLinear(float c) {
@@ -82,6 +89,57 @@ vec3 applySaturation(vec3 rgb, float saturation, float vibrance) {
   return clamp(mix(vec3(luma), rgb, factor), 0.0, 1.0);
 }
 
+// RGB <-> HSL (hue in degrees). Mirrors Rust rgb_to_hsl/hsl_to_rgb exactly.
+vec3 rgb2hsl(vec3 c) {
+  float maxc = max(max(c.r, c.g), c.b);
+  float minc = min(min(c.r, c.g), c.b);
+  float l = (maxc + minc) * 0.5;
+  float d = maxc - minc;
+  if (d <= 1e-6) return vec3(0.0, 0.0, l);
+  float s = d / (1.0 - abs(2.0 * l - 1.0));
+  float h;
+  if (maxc == c.r) h = (c.g - c.b) / d;
+  else if (maxc == c.g) h = (c.b - c.r) / d + 2.0;
+  else h = (c.r - c.g) / d + 4.0;
+  h = mod(h * 60.0, 360.0);
+  return vec3(h, s, l);
+}
+vec3 hsl2rgb(float h, float s, float l) {
+  float c = (1.0 - abs(2.0 * l - 1.0)) * s;
+  float hp = h / 60.0;
+  float x = c * (1.0 - abs(mod(hp, 2.0) - 1.0));
+  vec3 rgb1;
+  if (hp < 1.0) rgb1 = vec3(c, x, 0.0);
+  else if (hp < 2.0) rgb1 = vec3(x, c, 0.0);
+  else if (hp < 3.0) rgb1 = vec3(0.0, c, x);
+  else if (hp < 4.0) rgb1 = vec3(0.0, x, c);
+  else if (hp < 5.0) rgb1 = vec3(x, 0.0, c);
+  else rgb1 = vec3(c, 0.0, x);
+  return rgb1 + (l - c * 0.5);
+}
+
+// Per-hue HSL. Blends the two bands bracketing the pixel hue (constant-index
+// access keeps this WebGL1-safe). Mirror of Rust apply_hsl() — edit both together.
+vec3 applyHsl(vec3 rgb) {
+  vec3 hsl = rgb2hsl(rgb);
+  float h = hsl.x;
+  float dh, ds, dl;
+  if (h < 30.0)       { float t = h / 30.0;          dh = mix(uHslHue[0], uHslHue[1], t); ds = mix(uHslSat[0], uHslSat[1], t); dl = mix(uHslLum[0], uHslLum[1], t); }
+  else if (h < 60.0)  { float t = (h - 30.0) / 30.0; dh = mix(uHslHue[1], uHslHue[2], t); ds = mix(uHslSat[1], uHslSat[2], t); dl = mix(uHslLum[1], uHslLum[2], t); }
+  else if (h < 120.0) { float t = (h - 60.0) / 60.0; dh = mix(uHslHue[2], uHslHue[3], t); ds = mix(uHslSat[2], uHslSat[3], t); dl = mix(uHslLum[2], uHslLum[3], t); }
+  else if (h < 180.0) { float t = (h - 120.0) / 60.0; dh = mix(uHslHue[3], uHslHue[4], t); ds = mix(uHslSat[3], uHslSat[4], t); dl = mix(uHslLum[3], uHslLum[4], t); }
+  else if (h < 240.0) { float t = (h - 180.0) / 60.0; dh = mix(uHslHue[4], uHslHue[5], t); ds = mix(uHslSat[4], uHslSat[5], t); dl = mix(uHslLum[4], uHslLum[5], t); }
+  else if (h < 270.0) { float t = (h - 240.0) / 30.0; dh = mix(uHslHue[5], uHslHue[6], t); ds = mix(uHslSat[5], uHslSat[6], t); dl = mix(uHslLum[5], uHslLum[6], t); }
+  else if (h < 300.0) { float t = (h - 270.0) / 30.0; dh = mix(uHslHue[6], uHslHue[7], t); ds = mix(uHslSat[6], uHslSat[7], t); dl = mix(uHslLum[6], uHslLum[7], t); }
+  else                { float t = (h - 300.0) / 60.0; dh = mix(uHslHue[7], uHslHue[0], t); ds = mix(uHslSat[7], uHslSat[0], t); dl = mix(uHslLum[7], uHslLum[0], t); }
+
+  float colorMask = smoothstep(0.0, 0.15, hsl.y);
+  float h2 = mod(h + dh * HSL_HUE_DEG * colorMask, 360.0);
+  float s2 = clamp(hsl.y * (1.0 + ds * colorMask), 0.0, 1.0);
+  float l2 = clamp(hsl.z + dl * HSL_LUM_STRENGTH * colorMask, 0.0, 1.0);
+  return hsl2rgb(h2, s2, l2);
+}
+
 // Luminance-preserving white balance on linear RGB.
 // Mirror of Rust apply_white_balance() — edit both together.
 vec3 applyWhiteBalance(vec3 lin, float temperature, float tint) {
@@ -113,6 +171,11 @@ void main() {
 
   // Saturation / vibrance across all channels.
   vec3 outColor = applySaturation(v, uSaturation, uVibrance);
+
+  // Per-hue HSL (skipped entirely when no band is touched).
+  if (uHslActive > 0.5) {
+    outColor = applyHsl(outColor);
+  }
 
   gl_FragColor = vec4(outColor, src.a);
 }

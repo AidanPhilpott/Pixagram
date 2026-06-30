@@ -28,14 +28,14 @@
 //! 5. **Tone regions** — highlights / shadows / whites / blacks, each a
 //!    smoothstep-masked lift on the perceptual value (per channel).
 //! 6. **Contrast** — an S-curve around perceptual mid-grey (0.5) on that value.
-//! 7. **Saturation / vibrance** — scale each pixel's chroma (distance from its
+//! 7. **Tone curve** — a user-drawn monotonic spline, evaluated per channel.
+//! 8. **Saturation / vibrance** — scale each pixel's chroma (distance from its
 //!    grey/luma), across all three channels at once.
-//! 8. **HSL** — per-hue-band hue/saturation/luminance: convert to HSL, blend the
+//! 9. **HSL** — per-hue-band hue/saturation/luminance: convert to HSL, blend the
 //!    adjacent bands' adjustments at the pixel's hue, apply, convert back.
 //!
-//! Later phases insert the tone curve into this pipeline, driven by additional
-//! fields on `Adjustments`. Order matters and is the contract — keep it identical
-//! here and in the GLSL shader.
+//! This is the full Phase-2 color pipeline. Order matters and is the contract —
+//! keep it identical here and in the GLSL shader.
 
 use serde::{Deserialize, Serialize};
 
@@ -56,12 +56,25 @@ impl Default for HslBand {
     }
 }
 
+/// One tone-curve control point; both axes in `[0, 1]` (input x → output y, on
+/// the perceptual value). Mirror of the TS `CurvePoint`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CurvePoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Most control points a curve can have (UI cap); keeps `curve_eval` allocation-free.
+const MAX_CURVE_POINTS: usize = 16;
+
 /// A complete non-destructive adjustment stack for one photo.
 ///
 /// Field names and defaults are part of the contract with the TypeScript mirror
 /// (`src/adjustments/definition.ts`). Keep `#[serde(default)]` on every field so
 /// older/partial preset JSON keeps deserializing as the stack grows.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+///
+/// Not `Copy`: the tone curve is a `Vec`. Pass by `&` (as `apply_pixel` does).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Adjustments {
     /// Exposure compensation in stops (EV). 0.0 = unchanged. Range checked by the
@@ -101,6 +114,9 @@ pub struct Adjustments {
     /// Per-hue HSL adjustments, one entry per color band (red, orange, yellow,
     /// green, aqua, blue, purple, magenta — centers in `hsl_band_adjust`).
     pub hsl: [HslBand; 8],
+    /// Tone-curve control points, sorted by `x`, both axes in [0,1]. Default is
+    /// the identity line `[(0,0), (1,1)]`. Applied per channel after contrast.
+    pub curve: Vec<CurvePoint>,
 }
 
 impl Default for Adjustments {
@@ -117,6 +133,10 @@ impl Default for Adjustments {
             saturation: 0.0,
             vibrance: 0.0,
             hsl: [HslBand { hue: 0.0, sat: 0.0, lum: 0.0 }; 8],
+            curve: vec![
+                CurvePoint { x: 0.0, y: 0.0 },
+                CurvePoint { x: 1.0, y: 1.0 },
+            ],
         }
     }
 }
@@ -311,6 +331,68 @@ fn apply_hsl(rgb: [f32; 3], hsl: &[HslBand; 8]) -> [f32; 3] {
     hsl_to_rgb(h2, s2, l2)
 }
 
+/// Evaluate the tone curve at `x` (perceptual, [0,1]) with a monotonic cubic
+/// (Fritsch–Carlson) spline through `points`. `points` must be sorted by `x`
+/// with ≥2 entries; the identity line `[(0,0),(1,1)]` returns `x` exactly.
+/// **Mirror of `evalCurve` in `src/adjustments/curve.ts` — keep them identical.**
+fn curve_eval(points: &[CurvePoint], x: f32) -> f32 {
+    let n = points.len().min(MAX_CURVE_POINTS);
+    if n < 2 {
+        return if n == 1 { points[0].y } else { x.clamp(0.0, 1.0) };
+    }
+    if x <= points[0].x {
+        return points[0].y;
+    }
+    if x >= points[n - 1].x {
+        return points[n - 1].y;
+    }
+
+    // Secant slopes between consecutive points.
+    let mut d = [0.0_f32; MAX_CURVE_POINTS];
+    for i in 0..n - 1 {
+        let dx = points[i + 1].x - points[i].x;
+        d[i] = if dx > 1e-9 { (points[i + 1].y - points[i].y) / dx } else { 0.0 };
+    }
+
+    // Initial tangents (averaged), then the Fritsch–Carlson monotonicity clamp.
+    let mut m = [0.0_f32; MAX_CURVE_POINTS];
+    m[0] = d[0];
+    m[n - 1] = d[n - 2];
+    for i in 1..n - 1 {
+        m[i] = (d[i - 1] + d[i]) * 0.5;
+    }
+    for i in 0..n - 1 {
+        if d[i].abs() < 1e-9 {
+            m[i] = 0.0;
+            m[i + 1] = 0.0;
+        } else {
+            let a = m[i] / d[i];
+            let b = m[i + 1] / d[i];
+            let sq = a * a + b * b;
+            if sq > 9.0 {
+                let t = 3.0 / sq.sqrt();
+                m[i] = t * a * d[i];
+                m[i + 1] = t * b * d[i];
+            }
+        }
+    }
+
+    // Hermite-interpolate the segment containing x.
+    let mut k = 0;
+    while k < n - 2 && x >= points[k + 1].x {
+        k += 1;
+    }
+    let h = points[k + 1].x - points[k].x;
+    let t = (x - points[k].x) / h;
+    let (t2, t3) = (t * t, t * t * t);
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = t3 - 2.0 * t2 + t;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    let h11 = t3 - t2;
+    let y = h00 * points[k].y + h10 * h * m[k] + h01 * points[k + 1].y + h11 * h * m[k + 1];
+    y.clamp(0.0, 1.0)
+}
+
 /// Rec.709 relative luminance of a linear-light RGB triple.
 #[inline]
 fn luminance(c: [f32; 3]) -> f32 {
@@ -380,7 +462,9 @@ pub fn apply_pixel(adj: &Adjustments, rgb: [f32; 3]) -> [f32; 3] {
         // Encode to the perceptual domain, then shape tone regions + contrast.
         let v = linear_to_srgb(lin[i].max(0.0)).clamp(0.0, 1.0);
         let v = apply_tone_regions(v, adj);
-        out[i] = apply_contrast(v, adj.contrast).clamp(0.0, 1.0);
+        let v = apply_contrast(v, adj.contrast).clamp(0.0, 1.0);
+        // Tone curve (identity line is a no-op).
+        out[i] = curve_eval(&adj.curve, v);
     }
     // Saturation / vibrance — cross-channel, so it runs on the whole triple.
     let out = apply_saturation(out, adj.saturation, adj.vibrance);
@@ -555,5 +639,46 @@ mod tests {
         let blue = apply_pixel(&adj, [0.2, 0.2, 0.8]); // hue ~240
         let blue_spread = blue[0].max(blue[1]).max(blue[2]) - blue[0].min(blue[1]).min(blue[2]);
         assert!(blue_spread > 0.5, "blue should be untouched, got spread {blue_spread}");
+    }
+
+    #[test]
+    fn identity_curve_is_a_no_op() {
+        let adj = Adjustments::default();
+        for x in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let out = apply_pixel(&adj, [x; 3]);
+            assert!((out[0] - x).abs() < 1e-4, "identity curve moved {x} -> {}", out[0]);
+        }
+    }
+
+    #[test]
+    fn curve_lift_raises_midtones_and_pins_endpoints() {
+        let curve = vec![
+            CurvePoint { x: 0.0, y: 0.0 },
+            CurvePoint { x: 0.5, y: 0.7 },
+            CurvePoint { x: 1.0, y: 1.0 },
+        ];
+        let adj = Adjustments { curve, ..Default::default() };
+        let mid = apply_pixel(&adj, [0.5; 3]);
+        assert!(mid[0] > 0.65, "lifted midpoint should brighten mid-grey, got {}", mid[0]);
+        assert!(apply_pixel(&adj, [0.0; 3])[0] < 1e-3, "black stays pinned");
+        assert!((apply_pixel(&adj, [1.0; 3])[0] - 1.0).abs() < 1e-3, "white stays pinned");
+    }
+
+    #[test]
+    fn curve_is_monotonic_through_a_steep_point() {
+        // Even with a steep control point the mapping never decreases.
+        let curve = vec![
+            CurvePoint { x: 0.0, y: 0.0 },
+            CurvePoint { x: 0.3, y: 0.05 },
+            CurvePoint { x: 0.7, y: 0.95 },
+            CurvePoint { x: 1.0, y: 1.0 },
+        ];
+        let mut prev = -1.0;
+        for i in 0..=20 {
+            let x = i as f32 / 20.0;
+            let y = curve_eval(&curve, x);
+            assert!(y >= prev - 1e-4, "curve dipped at x={x}: {y} < {prev}");
+            prev = y;
+        }
     }
 }

@@ -3,6 +3,7 @@ import { ThumbnailGrid } from "./components/ThumbnailGrid";
 import { Preview } from "./components/Preview";
 import { AdjustmentSlider } from "./components/AdjustmentSlider";
 import { HslPanel } from "./components/HslPanel";
+import { CurveEditor } from "./components/CurveEditor";
 import {
   decodePreview,
   exportStub,
@@ -19,6 +20,7 @@ import {
   WB_RANGE,
   defaultAdjustments,
   type Adjustments,
+  type CurvePoint,
   type HslBand,
 } from "./adjustments/definition";
 
@@ -142,6 +144,18 @@ export function App() {
     [selectedId]
   );
 
+  // Replace the whole tone curve (the editor manages add/move/remove).
+  const updateCurve = useCallback(
+    (curve: CurvePoint[]) => {
+      if (!selectedId) return;
+      setStacks((prev) => ({
+        ...prev,
+        [selectedId]: { ...(prev[selectedId] ?? defaultAdjustments()), curve },
+      }));
+    },
+    [selectedId]
+  );
+
   const handleExport = useCallback(async () => {
     if (!selected) return;
     try {
@@ -205,6 +219,7 @@ export function App() {
               format={s.format}
             />
           ))}
+          <CurveEditor points={adjustments.curve} disabled={!selected} onChange={updateCurve} />
           <HslPanel bands={adjustments.hsl} disabled={!selected} onChange={updateHslBand} />
           {status && <div className="inspector__status">{status}</div>}
         </aside>

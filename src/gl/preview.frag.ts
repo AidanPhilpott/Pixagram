@@ -7,13 +7,15 @@
  *
  * Pipeline: sRGB -> linear, exposure (2^EV), white balance (luminance-preserving
  * chroma shift), linear -> sRGB, tone regions (highlights/shadows/whites/blacks),
- * contrast (S-curve around mid-grey 0.5), saturation/vibrance, HSL, clip.
+ * contrast (S-curve around mid-grey 0.5), tone curve (LUT), saturation/vibrance,
+ * HSL, clip.
  */
 export const FRAGMENT_SHADER = /* glsl */ `
 precision highp float;
 
 varying vec2 vUv;
 uniform sampler2D uImage;
+uniform sampler2D uCurveLut; // 256x1 baked tone-curve LUT (see curve.ts)
 uniform float uExposure;    // EV (stops), from the shared Adjustments definition
 uniform float uContrast;    // [-1, 1], from the shared Adjustments definition
 uniform float uTemperature; // [-1, 1], white-balance temp (warm/cool)
@@ -28,6 +30,7 @@ uniform float uHslHue[8];   // per-band hue rotation [-1, 1]
 uniform float uHslSat[8];   // per-band saturation [-1, 1]
 uniform float uHslLum[8];   // per-band luminance [-1, 1]
 uniform float uHslActive;   // 1.0 if any HSL band is non-neutral, else 0.0
+uniform float uCurveActive; // 1.0 if the tone curve isn't the identity, else 0.0
 
 // Full-scale chroma strengths — MUST match WB_*_STRENGTH in adjustments.rs.
 const float WB_TEMP_STRENGTH = 0.3;
@@ -168,6 +171,15 @@ void main() {
   vec3 v = clamp(linearToSrgb(max(lin, 0.0)), 0.0, 1.0);
   v = toneRegions(v);
   v = clamp(contrastCurve(v, uContrast), 0.0, 1.0);
+
+  // Tone curve: sample the baked LUT per channel (skipped when identity).
+  if (uCurveActive > 0.5) {
+    v = vec3(
+      texture2D(uCurveLut, vec2(v.r, 0.5)).r,
+      texture2D(uCurveLut, vec2(v.g, 0.5)).r,
+      texture2D(uCurveLut, vec2(v.b, 0.5)).r
+    );
+  }
 
   // Saturation / vibrance across all channels.
   vec3 outColor = applySaturation(v, uSaturation, uVibrance);

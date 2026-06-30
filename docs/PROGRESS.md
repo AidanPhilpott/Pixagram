@@ -7,6 +7,30 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-29 (session 4f) — Phase 2 step 6: tone curve (point/spline editor)
+
+- Committed step 5 (HSL) as `1a76c8d` after user verification.
+- **Step 6 op = tone curve** (user chose the point/spline editor over parametric
+  region sliders — the latter would overlap the step-3 tone-region controls). New
+  `CurvePoint{x,y}` + `curve: Vec<CurvePoint>` on the struct (default identity).
+  `Adjustments` is **no longer `Copy`** (Vec) — now `Clone`, passed by `&`.
+  - Math: monotonic-cubic Fritsch–Carlson spline, per channel after contrast. Lives
+    in Rust `curve_eval` AND TS `evalCurve` (kept identical). 3 unit tests.
+  - **Shader pattern differs:** GLSL doesn't re-implement the spline; TS bakes a
+    256-entry 8-bit LUT (`bakeCurveLut`) → `LUMINANCE` texture on unit 1, sampled per
+    channel. Rust export evaluates the spline directly. Same shape → preview ≈ export
+    (only LUT-quantization diff; preview is 8-bit anyway). `uCurveActive` + a seeded
+    identity ramp keep the inactive case a no-op.
+  - UI: new `CurveEditor` (SVG) — drag/add(≤16)/remove points, endpoints lock x; the
+    drawn line uses the same `evalCurve` so drawn == applied. `App.updateCurve`.
+- **Verified:** `npm run build` clean; `cargo test --lib` 18/18. Pending human eyeball.
+
+This completes the six core color ops. **Next:** verify → commit → Phase-2 hardening
+(ts-rs codegen so the TS mirror can't drift; 16-bit/float preview to stop banding) →
+tag `v0.2.0` → Phase 3 (presets/color profiles).
+
+---
+
 ## 2026-06-29 (session 4e) — Phase 2 step 5: HSL (per-hue bands)
 
 - Committed step 4 (vibrance/saturation) as `108d5e7` after user verification.

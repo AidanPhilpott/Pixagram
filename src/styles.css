@@ -311,6 +311,74 @@ body {
   cursor: default;
 }
 
+/* ── Tone curve ───────────────────────────────────────── */
+.curve {
+  margin-top: 12px;
+}
+.curve--disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.curve__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.curve__head label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.curve__canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #15171a;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  touch-action: none;
+}
+.curve__bg {
+  fill: transparent;
+  cursor: crosshair;
+}
+.curve__grid line {
+  stroke: var(--border);
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+.curve__identity {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+.curve__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.curve__point {
+  fill: #fff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+}
+.curve__point:hover {
+  fill: var(--accent);
+}
+.curve__hint {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
 /* ── HSL panel ────────────────────────────────────────── */
 .hsl {
   margin-top: 12px;

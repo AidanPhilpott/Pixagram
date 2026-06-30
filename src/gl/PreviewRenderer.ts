@@ -8,6 +8,7 @@
 import { VERTEX_SHADER } from "./preview.vert";
 import { FRAGMENT_SHADER } from "./preview.frag";
 import { defaultAdjustments, type Adjustments } from "../adjustments/definition";
+import { bakeCurveLut, isIdentityCurve } from "../adjustments/curve";
 
 export class PreviewRenderer {
   private gl: WebGLRenderingContext;
@@ -27,6 +28,8 @@ export class PreviewRenderer {
   private uHslSat: WebGLUniformLocation | null;
   private uHslLum: WebGLUniformLocation | null;
   private uHslActive: WebGLUniformLocation | null;
+  private uCurveActive: WebGLUniformLocation | null;
+  private curveTexture: WebGLTexture | null = null;
   // Reused scratch buffers so per-frame uniform uploads don't allocate.
   private hslHue = new Float32Array(8);
   private hslSat = new Float32Array(8);
@@ -81,7 +84,24 @@ export class PreviewRenderer {
     this.uHslSat = gl.getUniformLocation(this.program, "uHslSat");
     this.uHslLum = gl.getUniformLocation(this.program, "uHslLum");
     this.uHslActive = gl.getUniformLocation(this.program, "uHslActive");
+    this.uCurveActive = gl.getUniformLocation(this.program, "uCurveActive");
+
+    // Texture units: 0 = image, 1 = tone-curve LUT.
     gl.uniform1i(gl.getUniformLocation(this.program, "uImage"), 0);
+    gl.uniform1i(gl.getUniformLocation(this.program, "uCurveLut"), 1);
+
+    // 256x1 LUT texture; linear-filtered so the shader interpolates between entries.
+    // Seed with an identity ramp so the texture is always complete (the shader
+    // skips sampling it when the curve is inactive, but it must still be valid).
+    this.curveTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.curveTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const identityRamp = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) identityRamp[i] = i;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 256, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, identityRamp);
   }
 
   /** Replace the displayed image. Resizes the drawing buffer to match. */
@@ -142,6 +162,17 @@ export class PreviewRenderer {
     gl.uniform1fv(this.uHslLum, this.hslLum);
     gl.uniform1f(this.uHslActive, hslActive);
 
+    // Tone curve: bake the LUT and upload it to unit 1 (skip when identity).
+    const curve = this.adjustments.curve;
+    const curveActive = curve && !isIdentityCurve(curve) ? 1 : 0;
+    gl.uniform1f(this.uCurveActive, curveActive);
+    if (curveActive) {
+      const lut = bakeCurveLut(curve);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.curveTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, lut.length, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, lut);
+    }
+
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -150,6 +181,7 @@ export class PreviewRenderer {
   dispose(): void {
     const gl = this.gl;
     if (this.texture) gl.deleteTexture(this.texture);
+    if (this.curveTexture) gl.deleteTexture(this.curveTexture);
     gl.deleteProgram(this.program);
   }
 

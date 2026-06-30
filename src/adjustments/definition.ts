@@ -40,6 +40,20 @@ export const HSL_BANDS = [
   { name: "Magenta", hue: 300 },
 ] as const;
 
+/** One tone-curve control point; both axes in [0, 1]. Mirror of Rust `CurvePoint`. */
+export interface CurvePoint {
+  x: number;
+  y: number;
+}
+
+/** The neutral tone curve — the identity diagonal. */
+export function identityCurve(): CurvePoint[] {
+  return [
+    { x: 0, y: 0 },
+    { x: 1, y: 1 },
+  ];
+}
+
 /** A complete non-destructive adjustment stack for one photo. */
 export interface Adjustments {
   /** Exposure compensation in stops (EV). 0 = unchanged. UI range ~[-5, +5]. */
@@ -64,6 +78,8 @@ export interface Adjustments {
   vibrance: number;
   /** Per-hue HSL adjustments, one per `HSL_BANDS` entry (length 8). */
   hsl: HslBand[];
+  /** Tone-curve control points, sorted by x, both axes [0,1]. Default = identity. */
+  curve: CurvePoint[];
 }
 
 /** The neutral stack — equivalent to Rust's `Adjustments::default()`. */
@@ -80,6 +96,7 @@ export function defaultAdjustments(): Adjustments {
     saturation: 0,
     vibrance: 0,
     hsl: HSL_BANDS.map(() => ({ hue: 0, sat: 0, lum: 0 })),
+    curve: identityCurve(),
   };
 }
 

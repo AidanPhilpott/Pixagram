@@ -6,13 +6,15 @@
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
 **Last updated:** 2026-06-29 (session 4)
-**Current phase:** Phase 2 (Full adjustment pipeline) — **IN PROGRESS.** Phase 1 is
-COMPLETE/color-verified/tagged `v0.1.0`. Committed: step 1 (**contrast**, `a9a3beb`),
-step 2 (**white balance**, `261c468`), step 3 (**tone regions**, `68bfeb8`), step 4
-(**vibrance/saturation**, `108d5e7`) — all verified in the app. Step 5 (**HSL** —
-8 hue bands × hue/sat/lum, band-selector UI) is built across the three lockstep
-files; frontend builds, 15/15 Rust tests pass. **Awaiting human verification of the
-HSL panel before committing step 5 and starting step 6 (tone curve).**
+**Current phase:** Phase 2 (Full adjustment pipeline) — **IN PROGRESS (core ops
+done).** Phase 1 COMPLETE/tagged `v0.1.0`. Committed & app-verified: step 1
+(**contrast**, `a9a3beb`), step 2 (**white balance**, `261c468`), step 3 (**tone
+regions**, `68bfeb8`), step 4 (**vibrance/saturation**, `108d5e7`), step 5 (**HSL**,
+`1a76c8d`). Step 6 (**tone curve** — point/spline editor) is built across the lockstep
+files; frontend builds, 18/18 Rust tests pass. **Awaiting human verification of the
+curve editor before committing step 6.** After that the core color pipeline is
+COMPLETE — only the Phase-2 hardening items remain (ts-rs codegen, 16-bit preview),
+then tag and move to Phase 3.
 **Branch:** `master` (local-only, no remote) · **Last tag:** `v0.1.0`
 
 > **Color-profile / "Fuji recipe" feature → decided: belongs in Phase 3 (Presets).**
@@ -41,17 +43,18 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — continue Phase 2 (step 6: tone curve)
+## ⚠️ START HERE NEXT SESSION — Phase 2 hardening, then tag
 
-Steps 1–5 are built. **Next action: human-verify the HSL panel on a real RAF, commit
-step 5, then build step 6 — the tone curve** (the last core color op). After that:
-the Phase-2 hardening items (ts-rs codegen for the TS type; 16-bit/float preview).
-Then Phase 2 is done → tag, move to Phase 3 (Presets / color profiles).
-
-The tone curve is a different shape of control again (an editable curve widget, not a
-slider). Decide the model when it starts: parametric (Lightroom Highlights/Lights/
-Darks/Shadows region sliders, fits the existing slider machinery) vs a point/spline
-curve editor (a real curve canvas, more UI). Recommend starting parametric.
+All six core color ops are built (the tone curve is the last). **Next action:
+human-verify the curve editor, commit step 6. Then the remaining Phase-2 work is
+hardening, not new ops:**
+1. **ts-rs codegen** — generate the TS `Adjustments`/`HslBand`/`CurvePoint` types
+   from the Rust structs so the hand-mirror can't drift (constraint #1). The stack is
+   now big (10 scalars + hsl[8] + curve) — worth doing before Phase 3.
+2. **16-bit / float preview** — the preview texture is still 8-bit `UNSIGNED_BYTE`;
+   stacking this many tone ops will band on hard pushes. Move to a half-float texture.
+Then **tag `v0.2.0`** and start **Phase 3 (Presets / color profiles** — see the
+color-profile decision in Open Risks; a profile = a saved `Adjustments` JSON).
 
 **WB design (decided this session):** temp/tint is a **relative, luminance-preserving
 chroma shift on the developed image** (chosen over a true raw Kelvin WB, which would
@@ -60,7 +63,28 @@ Lightroom treats non-raw files. The develop's base-color accuracy (single D65 ma
 illuminant interpolation) is a **separate** develop-side task, unaffected by — and not
 fixed by — this slider. See "Open risks".
 
-### What landed in step 5 (HSL) — pending verify + commit
+### What landed in step 6 (tone curve) — pending verify + commit
+- New `CurvePoint { x, y }` type (Rust + TS) and `curve: Vec<CurvePoint>` on
+  `Adjustments` (default identity `[(0,0),(1,1)]`). **`Adjustments` is no longer
+  `Copy`** (a `Vec` can't be) — it's `Clone`; pass by `&` (already the case).
+- Math: a monotonic-cubic (Fritsch–Carlson) spline, applied per channel after
+  contrast. The spline lives in Rust `curve_eval` **and** TS `evalCurve` (must stay
+  identical) — 3 unit tests (identity no-op, midpoint lift pins endpoints, stays
+  monotonic through a steep point).
+- **WYSIWYG note (slightly different pattern):** the GLSL shader does *not*
+  re-implement the spline. TS bakes the curve into a 256-entry 8-bit LUT
+  (`bakeCurveLut`) uploaded as a `LUMINANCE` texture on **unit 1**; the shader samples
+  it per channel (HW-linear interp). Rust export evaluates the spline directly. Same
+  curve shape → preview ≈ export (tiny LUT-quantization diff only; the preview is
+  8-bit anyway). A `uCurveActive` flag + a seeded identity-ramp texture keep the
+  inactive case a clean no-op.
+- **UI:** new `CurveEditor` (SVG) — drag points, click empty space to add (≤16),
+  double-tap to remove; endpoints lock x. The drawn curve uses the same `evalCurve`,
+  so what's drawn == what's applied. `App` gained `updateCurve`. Remove uses **manual
+  double-tap detection** (a ref tracking last index+time), because `setPointerCapture`
+  swallows the native `dblclick` — see INSIGHTS.
+
+### What landed in step 5 (HSL)
 - New `HslBand { hue, sat, lum }` type (Rust + TS) and `hsl: [HslBand; 8]` on
   `Adjustments` (8 bands: red/orange/yellow/green/aqua/blue/purple/magenta). Default
   is 8 neutral bands; `#[serde(default)]` preserved so profiles still load.

@@ -87,6 +87,15 @@ in [../CLAUDE.md](../CLAUDE.md).)
 - Previews are downscaled (longest edge 2048px) **in Rust before IPC**; thumbnails
   to 384px. Never send a full 40MP buffer across the bridge.
 
+## Frontend / UI
+
+- **Pointer capture swallows `dblclick`.** In the `CurveEditor`, calling
+  `setPointerCapture` on `pointerdown` (needed so a drag keeps tracking when the
+  cursor leaves the point) redirects the follow-up compatibility `click`/`dblclick`
+  events to the *capturing* element — so a `onDoubleClick` on the captured target
+  never fires. Detect the double-tap manually instead (track last index + timestamp
+  in a ref, treat a quick second tap on the same point as the gesture).
+
 ## Performance
 
 - `Cargo.toml` sets `opt-level = 2` for all dependencies in the dev profile —

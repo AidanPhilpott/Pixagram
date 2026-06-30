@@ -7,11 +7,11 @@
 
 **Last updated:** 2026-06-29 (session 4)
 **Current phase:** Phase 2 (Full adjustment pipeline) — **IN PROGRESS.** Phase 1 is
-COMPLETE/color-verified/tagged `v0.1.0`. Step 1 (**contrast**, perceptual S-curve)
-is committed (`a9a3beb`), color-verified in the app. Step 2 (**white balance —
-temperature/tint**) is built across the three lockstep files; frontend builds, 8/8
-Rust tests pass. **Awaiting human verification of the temp/tint sliders before
-committing step 2 and starting step 3 (highlights/shadows/whites/blacks).**
+COMPLETE/color-verified/tagged `v0.1.0`. Committed: step 1 (**contrast**, `a9a3beb`)
+and step 2 (**white balance**, `261c468`), both verified in the app. Step 3 (**tone
+regions — highlights/shadows/whites/blacks**) is built across the three lockstep
+files; frontend builds, 11/11 Rust tests pass. **Awaiting human verification of the
+four tone sliders before committing step 3 and starting step 4 (vibrance/saturation).**
 **Branch:** `master` (local-only, no remote) · **Last tag:** `v0.1.0`
 
 > **Color-profile / "Fuji recipe" feature → decided: belongs in Phase 3 (Presets).**
@@ -40,14 +40,14 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — continue Phase 2 (step 3: highlights/shadows)
+## ⚠️ START HERE NEXT SESSION — continue Phase 2 (step 4: vibrance/saturation)
 
-Steps 1 (contrast) + 2 (white balance) are built. **Next action: human-verify the
-temp/tint sliders on a real RAF, commit step 2, then build step 3 — tone region
-sliders (highlights / shadows / whites / blacks)** following the same recipe (Rust
-`apply_pixel` + GLSL shader + TS mirror + slider, together). Each new op is: add a
-field to `Adjustments` (Rust + TS), shader math, one `<AdjustmentSlider>` in App.tsx
-wired through `updateField`.
+Steps 1–3 are built. **Next action: human-verify the four tone sliders on a real
+RAF, commit step 3, then build step 4 — vibrance + saturation** following the same
+recipe (Rust `apply_pixel` + GLSL shader + TS mirror + slider, together). Sliders are
+now **config-driven**: add a field to `Adjustments` (Rust + TS), the shader math, and
+one row to the `SLIDERS` array in App.tsx — no per-control JSX. Saturation/vibrance
+will need a luminance + per-pixel saturation calc (new vs the per-channel tone ops).
 
 **WB design (decided this session):** temp/tint is a **relative, luminance-preserving
 chroma shift on the developed image** (chosen over a true raw Kelvin WB, which would
@@ -56,7 +56,22 @@ Lightroom treats non-raw files. The develop's base-color accuracy (single D65 ma
 illuminant interpolation) is a **separate** develop-side task, unaffected by — and not
 fixed by — this slider. See "Open risks".
 
-### What landed in step 2 (white balance) — pending verify + commit
+### What landed in step 3 (tone regions) — pending verify + commit
+- `highlights` / `shadows` / `whites` / `blacks` fields (Rust + TS), default 0, UI
+  [-100,+100]. Applied on the perceptual value **after the encode, before contrast**,
+  per channel: each control owns a `smoothstep`-weighted band (highlights 0.4–0.9,
+  shadows 0.1–0.6, whites 0.6–1.0, blacks 0.0–0.4) and adds a lift scaled by
+  `TONE_STRENGTH = 0.2` (const both sides — must match). Mirrored in Rust
+  `apply_tone_regions` / GLSL `toneRegions`. 3 unit tests (each control hits its band,
+  endpoints move).
+- **Caveat:** per-channel (like contrast), so very saturated regions can shift hue
+  slightly; and extreme *combined* settings can posterize (additive masked lifts
+  aren't guaranteed monotonic at the limits). Fine for normal edits; revisit if it
+  bites. Strengths/band edges are tunable constants.
+- **Inspector refactor:** the 8 sliders are now driven by a `SLIDERS` config array in
+  App.tsx (`.map` → `<AdjustmentSlider>`), not hand-written blocks.
+
+### What landed in step 2 (white balance)
 - `temperature` + `tint` fields (Rust + TS), default 0, UI [-100,+100]. Applied in
   **linear light, between exposure and the encode**, as a luminance-preserving chroma
   shift: per-channel gains (`WB_TEMP_STRENGTH`/`WB_TINT_STRENGTH` = 0.3, duplicated as

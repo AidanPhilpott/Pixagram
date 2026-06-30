@@ -13,10 +13,31 @@ import {
 import {
   CONTRAST_RANGE,
   EXPOSURE_RANGE,
+  TONE_RANGE,
   WB_RANGE,
   defaultAdjustments,
   type Adjustments,
 } from "./adjustments/definition";
+
+/** Compact readout shared by all unit-less [-1,1] sliders (shown as [-100,+100]). */
+const asPercent = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`;
+
+/** Inspector slider rows, in display order. One row per `Adjustments` field. */
+const SLIDERS: ReadonlyArray<{
+  field: keyof Adjustments;
+  label: string;
+  range: { min: number; max: number; step: number };
+  format: (v: number) => string;
+}> = [
+  { field: "exposure", label: "Exposure", range: EXPOSURE_RANGE, format: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)} EV` },
+  { field: "contrast", label: "Contrast", range: CONTRAST_RANGE, format: asPercent },
+  { field: "temperature", label: "Temperature", range: WB_RANGE, format: asPercent },
+  { field: "tint", label: "Tint", range: WB_RANGE, format: asPercent },
+  { field: "highlights", label: "Highlights", range: TONE_RANGE, format: asPercent },
+  { field: "shadows", label: "Shadows", range: TONE_RANGE, format: asPercent },
+  { field: "whites", label: "Whites", range: TONE_RANGE, format: asPercent },
+  { field: "blacks", label: "Blacks", range: TONE_RANGE, format: asPercent },
+];
 
 export function App() {
   const [entries, setEntries] = useState<ImageEntry[]>([]);
@@ -146,54 +167,21 @@ export function App() {
           <h2 className="inspector__title">
             {selected ? selected.fileName : "Adjustments"}
           </h2>
-          <AdjustmentSlider
-            id="exposure"
-            label="Exposure"
-            value={adjustments.exposure}
-            min={EXPOSURE_RANGE.min}
-            max={EXPOSURE_RANGE.max}
-            step={EXPOSURE_RANGE.step}
-            defaultValue={0}
-            disabled={!selected}
-            onChange={(v) => updateField("exposure", v)}
-            format={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)} EV`}
-          />
-          <AdjustmentSlider
-            id="contrast"
-            label="Contrast"
-            value={adjustments.contrast}
-            min={CONTRAST_RANGE.min}
-            max={CONTRAST_RANGE.max}
-            step={CONTRAST_RANGE.step}
-            defaultValue={0}
-            disabled={!selected}
-            onChange={(v) => updateField("contrast", v)}
-            format={(v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`}
-          />
-          <AdjustmentSlider
-            id="temperature"
-            label="Temperature"
-            value={adjustments.temperature}
-            min={WB_RANGE.min}
-            max={WB_RANGE.max}
-            step={WB_RANGE.step}
-            defaultValue={0}
-            disabled={!selected}
-            onChange={(v) => updateField("temperature", v)}
-            format={(v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`}
-          />
-          <AdjustmentSlider
-            id="tint"
-            label="Tint"
-            value={adjustments.tint}
-            min={WB_RANGE.min}
-            max={WB_RANGE.max}
-            step={WB_RANGE.step}
-            defaultValue={0}
-            disabled={!selected}
-            onChange={(v) => updateField("tint", v)}
-            format={(v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`}
-          />
+          {SLIDERS.map((s) => (
+            <AdjustmentSlider
+              key={s.field}
+              id={s.field}
+              label={s.label}
+              value={adjustments[s.field]}
+              min={s.range.min}
+              max={s.range.max}
+              step={s.range.step}
+              defaultValue={0}
+              disabled={!selected}
+              onChange={(v) => updateField(s.field, v)}
+              format={s.format}
+            />
+          ))}
           {status && <div className="inspector__status">{status}</div>}
         </aside>
       </main>

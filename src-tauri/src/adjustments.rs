@@ -25,11 +25,13 @@
 //! 3. **White balance** — a luminance-preserving chroma shift (temp/tint),
 //!    linear light. Relative to the developed image, not a raw Kelvin WB.
 //! 4. Re-encode linear back to sRGB gamma and clip to [0, 1].
-//! 5. **Contrast** — an S-curve around perceptual mid-grey (0.5) on that value.
+//! 5. **Tone regions** — highlights / shadows / whites / blacks, each a
+//!    smoothstep-masked lift on the perceptual value (per channel).
+//! 6. **Contrast** — an S-curve around perceptual mid-grey (0.5) on that value.
 //!
-//! Later phases insert highlights/shadows, tone curve, HSL, etc. into this
-//! pipeline, all driven by additional fields on `Adjustments`. Order matters and
-//! is the contract — keep it identical here and in the GLSL shader.
+//! Later phases insert tone curve, HSL, etc. into this pipeline, all driven by
+//! additional fields on `Adjustments`. Order matters and is the contract — keep
+//! it identical here and in the GLSL shader.
 
 use serde::{Deserialize, Serialize};
 
@@ -56,6 +58,18 @@ pub struct Adjustments {
     /// White-balance tint in [-1.0, +1.0]. 0.0 = neutral; positive shifts toward
     /// magenta, negative toward green. Luminance-preserving. UI shows [-100, +100].
     pub tint: f32,
+    /// Highlights in [-1.0, +1.0]. 0.0 = unchanged; positive brightens the bright
+    /// mid-tones, negative recovers them. UI shows [-100, +100].
+    pub highlights: f32,
+    /// Shadows in [-1.0, +1.0]. 0.0 = unchanged; positive lifts the dark
+    /// mid-tones, negative deepens them. UI shows [-100, +100].
+    pub shadows: f32,
+    /// Whites in [-1.0, +1.0]. 0.0 = unchanged; positive pushes the near-white
+    /// end up (toward clipping), negative pulls it back. UI shows [-100, +100].
+    pub whites: f32,
+    /// Blacks in [-1.0, +1.0]. 0.0 = unchanged; positive lifts the near-black
+    /// end, negative crushes it. UI shows [-100, +100].
+    pub blacks: f32,
 }
 
 impl Default for Adjustments {
@@ -65,6 +79,10 @@ impl Default for Adjustments {
             contrast: 0.0,
             temperature: 0.0,
             tint: 0.0,
+            highlights: 0.0,
+            shadows: 0.0,
+            whites: 0.0,
+            blacks: 0.0,
         }
     }
 }
@@ -73,6 +91,10 @@ impl Default for Adjustments {
 /// Tunable constants, not architecture — but they MUST match the GLSL shader.
 const WB_TEMP_STRENGTH: f32 = 0.3;
 const WB_TINT_STRENGTH: f32 = 0.3;
+
+/// Full-scale lift the tone-region controls can apply to the perceptual value.
+/// Tunable; MUST match `TONE_STRENGTH` in the GLSL shader.
+const TONE_STRENGTH: f32 = 0.2;
 
 /// Decode one sRGB-encoded channel value (0..=1) to linear light.
 #[inline]
@@ -100,6 +122,32 @@ fn linear_to_srgb(c: f32) -> f32 {
 fn smoothstep01(v: f32) -> f32 {
     let v = v.clamp(0.0, 1.0);
     v * v * (3.0 - 2.0 * v)
+}
+
+/// General Hermite smoothstep between two edges — mirrors GLSL `smoothstep`.
+#[inline]
+fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Apply the four tone-region controls to one perceptual channel value.
+///
+/// Each control owns a smoothstep-weighted band of the tonal range and adds a
+/// lift scaled by its amount: highlights/whites toward white, shadows/blacks
+/// toward black, with whites/blacks biased to the extremes. Per channel, like
+/// contrast. **Mirror of `toneRegions` in the GLSL shader — edit both together.**
+#[inline]
+fn apply_tone_regions(v: f32, adj: &Adjustments) -> f32 {
+    let w_highlights = smoothstep(0.4, 0.9, v);
+    let w_shadows = 1.0 - smoothstep(0.1, 0.6, v);
+    let w_whites = smoothstep(0.6, 1.0, v);
+    let w_blacks = 1.0 - smoothstep(0.0, 0.4, v);
+    let delta = adj.highlights * w_highlights
+        + adj.shadows * w_shadows
+        + adj.whites * w_whites
+        + adj.blacks * w_blacks;
+    (v + TONE_STRENGTH * delta).clamp(0.0, 1.0)
 }
 
 /// Rec.709 relative luminance of a linear-light RGB triple.
@@ -168,8 +216,9 @@ pub fn apply_pixel(adj: &Adjustments, rgb: [f32; 3]) -> [f32; 3] {
 
     let mut out = [0.0_f32; 3];
     for i in 0..3 {
-        // Encode to the perceptual domain, then contrast S-curve on it.
+        // Encode to the perceptual domain, then shape tone regions + contrast.
         let v = linear_to_srgb(lin[i].max(0.0)).clamp(0.0, 1.0);
+        let v = apply_tone_regions(v, adj);
         out[i] = apply_contrast(v, adj.contrast).clamp(0.0, 1.0);
     }
     out
@@ -259,5 +308,34 @@ mod tests {
         assert!(magenta[1] < magenta[0] && magenta[1] < magenta[2], "magenta dips green");
         let green = apply_white_balance(grey, 0.0, -0.6);
         assert!(green[1] > green[0] && green[1] > green[2], "green tint lifts green");
+    }
+
+    #[test]
+    fn highlights_act_on_highlights_not_shadows() {
+        let adj = Adjustments { highlights: 1.0, ..Default::default() };
+        let hi = apply_pixel(&adj, [0.8; 3]);
+        let lo = apply_pixel(&adj, [0.1; 3]);
+        assert!(hi[0] > 0.8, "highlights+ should brighten a highlight");
+        assert!((lo[0] - 0.1).abs() < 0.02, "a deep shadow should be barely touched");
+    }
+
+    #[test]
+    fn shadows_act_on_shadows_not_highlights() {
+        let adj = Adjustments { shadows: 1.0, ..Default::default() };
+        let lo = apply_pixel(&adj, [0.15; 3]);
+        let hi = apply_pixel(&adj, [0.85; 3]);
+        assert!(lo[0] > 0.15, "shadows+ should lift a shadow");
+        assert!((hi[0] - 0.85).abs() < 0.03, "a highlight should be barely touched");
+    }
+
+    #[test]
+    fn whites_and_blacks_move_the_endpoints() {
+        let crush = Adjustments { blacks: -1.0, ..Default::default() };
+        let near_black = apply_pixel(&crush, [0.1; 3]);
+        assert!(near_black[0] < 0.1, "blacks- should crush near-black");
+
+        let lift = Adjustments { whites: 1.0, ..Default::default() };
+        let near_white = apply_pixel(&lift, [0.9; 3]);
+        assert!(near_white[0] > 0.9, "whites+ should brighten near-white");
     }
 }

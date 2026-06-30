@@ -7,6 +7,27 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-29 (session 4c) — Phase 2 step 3: tone regions
+
+- Committed step 2 (WB) as `261c468` after the user verified temp/tint in the app.
+- **Step 3 op = tone regions** (highlights/shadows/whites/blacks). Added four fields
+  to the struct/shader/TS mirror + four sliders. Applied per channel on the
+  perceptual value after the encode, before contrast: each control owns a
+  `smoothstep`-weighted tonal band and adds a lift scaled by `TONE_STRENGTH = 0.2`
+  (const both sides). Rust `apply_tone_regions` ↔ GLSL `toneRegions` kept identical.
+  3 unit tests (each control acts on its band; endpoints move).
+  - Known tradeoffs: per-channel → mild hue shift in very saturated regions; additive
+    masked lifts aren't strictly monotonic, so extreme *combined* settings can
+    posterize. Acceptable for normal edits; band edges + strength are tunable.
+- **Refactor:** the inspector's now-8 sliders are config-driven via a `SLIDERS` array
+  in App.tsx (mapped to `<AdjustmentSlider>`), replacing the repetitive JSX blocks.
+- **Verified:** `npm run build` clean; `cargo test --lib` 11/11. Pending human eyeball
+  of the four tone sliders, then commit.
+
+**Next:** verify tone regions → commit → step 4 (vibrance/saturation).
+
+---
+
 ## 2026-06-29 (session 4b) — Phase 2 step 2: white balance (temp/tint)
 
 - Committed step 1 (contrast) as `a9a3beb` after the user verified the S-curve and

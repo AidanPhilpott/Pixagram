@@ -17,6 +17,10 @@ export class PreviewRenderer {
   private uContrast: WebGLUniformLocation | null;
   private uTemperature: WebGLUniformLocation | null;
   private uTint: WebGLUniformLocation | null;
+  private uHighlights: WebGLUniformLocation | null;
+  private uShadows: WebGLUniformLocation | null;
+  private uWhites: WebGLUniformLocation | null;
+  private uBlacks: WebGLUniformLocation | null;
   private hasImage = false;
   private adjustments: Adjustments = defaultAdjustments();
 
@@ -57,6 +61,10 @@ export class PreviewRenderer {
     this.uContrast = gl.getUniformLocation(this.program, "uContrast");
     this.uTemperature = gl.getUniformLocation(this.program, "uTemperature");
     this.uTint = gl.getUniformLocation(this.program, "uTint");
+    this.uHighlights = gl.getUniformLocation(this.program, "uHighlights");
+    this.uShadows = gl.getUniformLocation(this.program, "uShadows");
+    this.uWhites = gl.getUniformLocation(this.program, "uWhites");
+    this.uBlacks = gl.getUniformLocation(this.program, "uBlacks");
     gl.uniform1i(gl.getUniformLocation(this.program, "uImage"), 0);
   }
 
@@ -97,6 +105,10 @@ export class PreviewRenderer {
     gl.uniform1f(this.uContrast, this.adjustments.contrast);
     gl.uniform1f(this.uTemperature, this.adjustments.temperature);
     gl.uniform1f(this.uTint, this.adjustments.tint);
+    gl.uniform1f(this.uHighlights, this.adjustments.highlights);
+    gl.uniform1f(this.uShadows, this.adjustments.shadows);
+    gl.uniform1f(this.uWhites, this.adjustments.whites);
+    gl.uniform1f(this.uBlacks, this.adjustments.blacks);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.drawArrays(gl.TRIANGLES, 0, 6);

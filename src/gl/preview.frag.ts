@@ -6,7 +6,8 @@
  * live in that Rust module. If you change the math there, change it here too.
  *
  * Pipeline: sRGB -> linear, exposure (2^EV), white balance (luminance-preserving
- * chroma shift), linear -> sRGB, contrast (S-curve around mid-grey 0.5), clip.
+ * chroma shift), linear -> sRGB, tone regions (highlights/shadows/whites/blacks),
+ * contrast (S-curve around mid-grey 0.5), clip.
  */
 export const FRAGMENT_SHADER = /* glsl */ `
 precision highp float;
@@ -17,10 +18,16 @@ uniform float uExposure;    // EV (stops), from the shared Adjustments definitio
 uniform float uContrast;    // [-1, 1], from the shared Adjustments definition
 uniform float uTemperature; // [-1, 1], white-balance temp (warm/cool)
 uniform float uTint;        // [-1, 1], white-balance tint (green/magenta)
+uniform float uHighlights;  // [-1, 1], tone region
+uniform float uShadows;     // [-1, 1], tone region
+uniform float uWhites;      // [-1, 1], tone region
+uniform float uBlacks;      // [-1, 1], tone region
 
 // Full-scale chroma strengths — MUST match WB_*_STRENGTH in adjustments.rs.
 const float WB_TEMP_STRENGTH = 0.3;
 const float WB_TINT_STRENGTH = 0.3;
+// Full-scale tone-region lift — MUST match TONE_STRENGTH in adjustments.rs.
+const float TONE_STRENGTH = 0.2;
 
 // Per-channel sRGB <-> linear, matching the Rust implementation exactly.
 float srgbToLinear(float c) {
@@ -48,6 +55,22 @@ vec3 contrastCurve(vec3 v, float c) {
   return vec3(contrastCurve(v.r, c), contrastCurve(v.g, c), contrastCurve(v.b, c));
 }
 
+// Tone-region shaping on a perceptual [0,1] value: highlights/shadows/whites/
+// blacks each lift a smoothstep-weighted band. Mirror of Rust
+// apply_tone_regions() — edit both together.
+float toneRegions(float v) {
+  float wHighlights = smoothstep(0.4, 0.9, v);
+  float wShadows = 1.0 - smoothstep(0.1, 0.6, v);
+  float wWhites = smoothstep(0.6, 1.0, v);
+  float wBlacks = 1.0 - smoothstep(0.0, 0.4, v);
+  float delta = uHighlights * wHighlights + uShadows * wShadows
+              + uWhites * wWhites + uBlacks * wBlacks;
+  return clamp(v + TONE_STRENGTH * delta, 0.0, 1.0);
+}
+vec3 toneRegions(vec3 v) {
+  return vec3(toneRegions(v.r), toneRegions(v.g), toneRegions(v.b));
+}
+
 // Luminance-preserving white balance on linear RGB.
 // Mirror of Rust apply_white_balance() — edit both together.
 vec3 applyWhiteBalance(vec3 lin, float temperature, float tint) {
@@ -72,8 +95,9 @@ void main() {
   vec3 lin = srgbToLinear(src.rgb) * gain;
   lin = applyWhiteBalance(lin, uTemperature, uTint);
 
-  // Encode to the perceptual domain, then contrast S-curve on it.
+  // Encode to the perceptual domain, then shape tone regions + contrast.
   vec3 v = clamp(linearToSrgb(max(lin, 0.0)), 0.0, 1.0);
+  v = toneRegions(v);
   vec3 outColor = clamp(contrastCurve(v, uContrast), 0.0, 1.0);
 
   gl_FragColor = vec4(outColor, src.a);

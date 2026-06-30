@@ -20,11 +20,15 @@ export interface Adjustments {
   exposure: number;
   /** Contrast in [-1, 1]. 0 = unchanged. Shown to the user as [-100, +100]. */
   contrast: number;
+  /** WB temperature in [-1, 1]. 0 = neutral; + warms, - cools. UI [-100, +100]. */
+  temperature: number;
+  /** WB tint in [-1, 1]. 0 = neutral; + magenta, - green. UI [-100, +100]. */
+  tint: number;
 }
 
 /** The neutral stack — equivalent to Rust's `Adjustments::default()`. */
 export function defaultAdjustments(): Adjustments {
-  return { exposure: 0, contrast: 0 };
+  return { exposure: 0, contrast: 0, temperature: 0, tint: 0 };
 }
 
 /** UI bounds for the exposure slider (stops). Tunable constant, not architecture. */
@@ -32,3 +36,6 @@ export const EXPOSURE_RANGE = { min: -5, max: 5, step: 0.01 } as const;
 
 /** UI bounds for the contrast slider (stored in [-1, 1]). */
 export const CONTRAST_RANGE = { min: -1, max: 1, step: 0.01 } as const;
+
+/** UI bounds for the white-balance sliders (stored in [-1, 1]). */
+export const WB_RANGE = { min: -1, max: 1, step: 0.01 } as const;

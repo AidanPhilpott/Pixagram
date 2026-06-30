@@ -5,16 +5,22 @@
  * (`src-tauri/src/adjustments.rs`). The canonical spec and the pipeline order
  * live in that Rust module. If you change the math there, change it here too.
  *
- * Pipeline: sRGB -> linear, exposure (2^EV), linear -> sRGB, contrast (S-curve
- * around perceptual mid-grey 0.5), clip.
+ * Pipeline: sRGB -> linear, exposure (2^EV), white balance (luminance-preserving
+ * chroma shift), linear -> sRGB, contrast (S-curve around mid-grey 0.5), clip.
  */
 export const FRAGMENT_SHADER = /* glsl */ `
 precision highp float;
 
 varying vec2 vUv;
 uniform sampler2D uImage;
-uniform float uExposure; // EV (stops), from the shared Adjustments definition
-uniform float uContrast; // [-1, 1], from the shared Adjustments definition
+uniform float uExposure;    // EV (stops), from the shared Adjustments definition
+uniform float uContrast;    // [-1, 1], from the shared Adjustments definition
+uniform float uTemperature; // [-1, 1], white-balance temp (warm/cool)
+uniform float uTint;        // [-1, 1], white-balance tint (green/magenta)
+
+// Full-scale chroma strengths — MUST match WB_*_STRENGTH in adjustments.rs.
+const float WB_TEMP_STRENGTH = 0.3;
+const float WB_TINT_STRENGTH = 0.3;
 
 // Per-channel sRGB <-> linear, matching the Rust implementation exactly.
 float srgbToLinear(float c) {
@@ -42,14 +48,32 @@ vec3 contrastCurve(vec3 v, float c) {
   return vec3(contrastCurve(v.r, c), contrastCurve(v.g, c), contrastCurve(v.b, c));
 }
 
+// Luminance-preserving white balance on linear RGB.
+// Mirror of Rust apply_white_balance() — edit both together.
+vec3 applyWhiteBalance(vec3 lin, float temperature, float tint) {
+  vec3 g = vec3(
+    1.0 + WB_TEMP_STRENGTH * temperature,
+    1.0 - WB_TINT_STRENGTH * tint,
+    1.0 - WB_TEMP_STRENGTH * temperature
+  );
+  vec3 shifted = lin * g;
+  const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+  float before = dot(lin, LUMA);
+  float after = dot(shifted, LUMA);
+  float scale = after > 1e-6 ? before / after : 1.0;
+  return shifted * scale;
+}
+
 void main() {
   vec4 src = texture2D(uImage, vUv);
 
-  // Exposure in linear light, then encode to the perceptual domain.
+  // Exposure, then white balance — both in linear light.
   float gain = pow(2.0, uExposure);
-  vec3 v = clamp(linearToSrgb(srgbToLinear(src.rgb) * gain), 0.0, 1.0);
+  vec3 lin = srgbToLinear(src.rgb) * gain;
+  lin = applyWhiteBalance(lin, uTemperature, uTint);
 
-  // Contrast S-curve on the perceptual value.
+  // Encode to the perceptual domain, then contrast S-curve on it.
+  vec3 v = clamp(linearToSrgb(max(lin, 0.0)), 0.0, 1.0);
   vec3 outColor = clamp(contrastCurve(v, uContrast), 0.0, 1.0);
 
   gl_FragColor = vec4(outColor, src.a);

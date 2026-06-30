@@ -13,6 +13,7 @@ import {
 import {
   CONTRAST_RANGE,
   EXPOSURE_RANGE,
+  WB_RANGE,
   defaultAdjustments,
   type Adjustments,
 } from "./adjustments/definition";
@@ -167,6 +168,30 @@ export function App() {
             defaultValue={0}
             disabled={!selected}
             onChange={(v) => updateField("contrast", v)}
+            format={(v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`}
+          />
+          <AdjustmentSlider
+            id="temperature"
+            label="Temperature"
+            value={adjustments.temperature}
+            min={WB_RANGE.min}
+            max={WB_RANGE.max}
+            step={WB_RANGE.step}
+            defaultValue={0}
+            disabled={!selected}
+            onChange={(v) => updateField("temperature", v)}
+            format={(v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`}
+          />
+          <AdjustmentSlider
+            id="tint"
+            label="Tint"
+            value={adjustments.tint}
+            min={WB_RANGE.min}
+            max={WB_RANGE.max}
+            step={WB_RANGE.step}
+            defaultValue={0}
+            disabled={!selected}
+            onChange={(v) => updateField("tint", v)}
             format={(v) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`}
           />
           {status && <div className="inspector__status">{status}</div>}

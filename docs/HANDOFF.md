@@ -7,10 +7,11 @@
 
 **Last updated:** 2026-06-29 (session 4)
 **Current phase:** Phase 2 (Full adjustment pipeline) — **IN PROGRESS.** Phase 1 is
-COMPLETE/color-verified/tagged `v0.1.0`. Phase 2 step 1 (**contrast**) is built
-across the three lockstep files + the slider plumbing was generalized; frontend
-builds and all 4 Rust tests pass. **Awaiting human verification of the contrast
-slider in the running app before step 2 (white balance temp/tint).**
+COMPLETE/color-verified/tagged `v0.1.0`. Step 1 (**contrast**, perceptual S-curve)
+is committed (`a9a3beb`), color-verified in the app. Step 2 (**white balance —
+temperature/tint**) is built across the three lockstep files; frontend builds, 8/8
+Rust tests pass. **Awaiting human verification of the temp/tint sliders before
+committing step 2 and starting step 3 (highlights/shadows/whites/blacks).**
 **Branch:** `master` (local-only, no remote) · **Last tag:** `v0.1.0`
 
 > **Color-profile / "Fuji recipe" feature → decided: belongs in Phase 3 (Presets).**
@@ -39,15 +40,32 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — continue Phase 2 (step 2: white balance)
+## ⚠️ START HERE NEXT SESSION — continue Phase 2 (step 3: highlights/shadows)
 
-Phase 2 step 1 (**contrast**) landed this session. **Next action: human-verify the
-contrast slider on a real RAF in the running app, then build step 2 — white balance
-(temp/tint)** following the same one-op-at-a-time recipe (Rust `apply_pixel` + GLSL
-shader + TS mirror + slider, together). The plumbing is now generalized so each new
-op is: add a field to `Adjustments` (Rust + TS), one shader line, one
-`<AdjustmentSlider>` in App.tsx wired through `updateField`. WB will also need the
-illuminant-interpolation follow-up (single D65 matrix today — see "Open risks").
+Steps 1 (contrast) + 2 (white balance) are built. **Next action: human-verify the
+temp/tint sliders on a real RAF, commit step 2, then build step 3 — tone region
+sliders (highlights / shadows / whites / blacks)** following the same recipe (Rust
+`apply_pixel` + GLSL shader + TS mirror + slider, together). Each new op is: add a
+field to `Adjustments` (Rust + TS), shader math, one `<AdjustmentSlider>` in App.tsx
+wired through `updateField`.
+
+**WB design (decided this session):** temp/tint is a **relative, luminance-preserving
+chroma shift on the developed image** (chosen over a true raw Kelvin WB, which would
+require re-developing per slider tick and break the live GPU preview). This is how
+Lightroom treats non-raw files. The develop's base-color accuracy (single D65 matrix,
+illuminant interpolation) is a **separate** develop-side task, unaffected by — and not
+fixed by — this slider. See "Open risks".
+
+### What landed in step 2 (white balance) — pending verify + commit
+- `temperature` + `tint` fields (Rust + TS), default 0, UI [-100,+100]. Applied in
+  **linear light, between exposure and the encode**, as a luminance-preserving chroma
+  shift: per-channel gains (`WB_TEMP_STRENGTH`/`WB_TINT_STRENGTH` = 0.3, duplicated as
+  consts both sides — must match) then a Rec.709-luminance renormalize so WB changes
+  only color, never brightness. Mirrored in Rust `apply_white_balance` and GLSL
+  `applyWhiteBalance`. 3 unit tests (luma preserved; warm favors red; tint moves
+  green↔magenta).
+- Temperature warms (R↑/B↓) / cools (reverse); tint moves green↔magenta via the green
+  channel + the luma renorm. Strength 0.3 is tunable.
 
 ### What landed in step 1 (contrast)
 - `contrast: f32` field added to `Adjustments` (Rust + TS mirror), default 0, UI

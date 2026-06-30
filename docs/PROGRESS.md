@@ -7,6 +7,28 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-29 (session 4b) — Phase 2 step 2: white balance (temp/tint)
+
+- Committed step 1 (contrast) as `a9a3beb` after the user verified the S-curve and
+  the slider-card spacing in the running app.
+- **Decision:** WB slider = a **relative, luminance-preserving chroma shift on the
+  developed image**, not a true raw Kelvin WB. User chose this (over re-developing
+  the RAF per tick) so WB stays in the live GPU pipeline / shared preview==export
+  shader — matches how Lightroom treats non-raw files. The develop's base D65-matrix
+  accuracy is a separate, still-open develop-side task.
+- **Step 2 op = white balance.** Added `temperature` + `tint` to the struct
+  (`adjustments.rs`), shader (`preview.frag.ts`), TS mirror (`definition.ts`), and two
+  sliders. Applied in linear light between exposure and the encode: per-channel gains
+  (strength 0.3, const both sides) + a Rec.709-luminance renormalize so it's pure
+  chroma (no brightness shift). Temp = R/B warm-cool; tint = green↔magenta via G.
+  Rust `apply_white_balance` ↔ GLSL `applyWhiteBalance` kept identical. 3 unit tests.
+- **Verified:** `npm run build` clean; `cargo test --lib` 8/8. Pending human eyeball
+  of temp/tint in the app, then commit.
+
+**Next:** verify WB → commit → step 3 (highlights/shadows/whites/blacks).
+
+---
+
 ## 2026-06-29 (session 4) — Phase 2 kickoff: contrast + generalized plumbing
 
 Began Phase 2 (full adjustment pipeline). Also settled where the user's

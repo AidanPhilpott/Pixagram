@@ -32,7 +32,7 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use image::{DynamicImage, RgbImage};
+use image::{DynamicImage, ImageBuffer, Rgb};
 use rawler::rawimage::{RawImage, RawImageData};
 
 /// sRGB (linear, D65) primaries → CIE XYZ. Used to build the camera→sRGB matrix.
@@ -123,7 +123,9 @@ fn develop_rawimage(raw: &RawImage, max_edge: u32) -> Option<DynamicImage> {
     let period_x = cfa.width.max(1);
     let period_y = cfa.height.max(1);
 
-    let mut out = RgbImage::new(out_w, out_h);
+    // 16-bit output: the develop computes in f32, so emitting u16 (not u8) hands
+    // the GPU preview far more tonal headroom — stacked tone ops won't band.
+    let mut out: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::new(out_w, out_h);
     for oy in 0..out_h {
         let mut sy0 = (oy as f32 * scale) as usize;
         let mut sy1 = (((oy + 1) as f32 * scale) as usize).max(sy0 + 1);
@@ -165,19 +167,19 @@ fn develop_rawimage(raw: &RawImage, max_edge: u32) -> Option<DynamicImage> {
             }
 
             // camera RGB → linear sRGB, baseline exposure, sRGB gamma.
-            let mut px = [0u8; 3];
+            let mut px = [0u16; 3];
             for i in 0..3 {
                 let lin = (cam2srgb[i][0] * cam[0]
                     + cam2srgb[i][1] * cam[1]
                     + cam2srgb[i][2] * cam[2])
                     * gain;
-                px[i] = (linear_to_srgb(lin.clamp(0.0, 1.0)) * 255.0).round() as u8;
+                px[i] = (linear_to_srgb(lin.clamp(0.0, 1.0)) * 65535.0).round() as u16;
             }
-            out.put_pixel(ox, oy, image::Rgb(px));
+            out.put_pixel(ox, oy, Rgb(px));
         }
     }
 
-    Some(DynamicImage::ImageRgb8(out))
+    Some(DynamicImage::ImageRgb16(out))
 }
 
 /// Choose the camera color matrix (XYZ→camera). Prefer the D65 illuminant — the

@@ -9,6 +9,14 @@ interface PreviewProps {
   loading: boolean;
 }
 
+/** Decode base64 little-endian u16 pixel data into a Uint16Array (LE targets). */
+function decodeU16(b64: string): Uint16Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Uint16Array(bytes.buffer);
+}
+
 /** WebGL live preview. Re-renders on adjustment change without re-decoding. */
 export function Preview({ preview, adjustments, loading }: PreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -33,13 +41,13 @@ export function Preview({ preview, adjustments, loading }: PreviewProps) {
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer || !preview) return;
-    const img = new Image();
-    img.onload = () => {
-      renderer.setImage(img);
+    try {
+      const data = decodeU16(preview.data);
+      renderer.setImage(preview.width, preview.height, data);
       renderer.setAdjustments(adjustments);
-    };
-    img.onerror = () => setError("Failed to load decoded preview image.");
-    img.src = preview.dataUrl;
+    } catch {
+      setError("Failed to decode preview pixel data.");
+    }
     // adjustments intentionally omitted: re-uploading on every slider tick is wasteful.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preview]);

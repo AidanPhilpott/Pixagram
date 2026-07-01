@@ -16,7 +16,8 @@ export interface ImageEntry {
 export interface PreviewPayload {
   width: number;
   height: number;
-  dataUrl: string;
+  /** Base64 of raw RGB pixels as little-endian u16 (sRGB-encoded, row 0 at top). */
+  data: string;
 }
 
 /** Open a native file picker for one or many Fujifilm RAF files. */

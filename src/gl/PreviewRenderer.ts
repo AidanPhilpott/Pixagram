@@ -30,6 +30,8 @@ export class PreviewRenderer {
   private uHslActive: WebGLUniformLocation | null;
   private uCurveActive: WebGLUniformLocation | null;
   private curveTexture: WebGLTexture | null = null;
+  /** True when float textures + linear filtering are available (16-bit preview). */
+  private floatLinear = false;
   // Reused scratch buffers so per-frame uniform uploads don't allocate.
   private hslHue = new Float32Array(8);
   private hslSat = new Float32Array(8);
@@ -44,6 +46,12 @@ export class PreviewRenderer {
     });
     if (!gl) throw new Error("WebGL is not available in this environment.");
     this.gl = gl;
+
+    // 16-bit preview needs float textures + linear filtering of them. Ubiquitous
+    // on desktop; if absent we fall back to an 8-bit upload in setImage.
+    const floatExt = gl.getExtension("OES_texture_float");
+    const floatLinearExt = gl.getExtension("OES_texture_float_linear");
+    this.floatLinear = !!(floatExt && floatLinearExt);
 
     this.program = this.buildProgram(VERTEX_SHADER, FRAGMENT_SHADER);
     gl.useProgram(this.program);
@@ -104,22 +112,46 @@ export class PreviewRenderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 256, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, identityRamp);
   }
 
-  /** Replace the displayed image. Resizes the drawing buffer to match. */
-  setImage(image: HTMLImageElement): void {
+  /**
+   * Upload a developed preview from raw 16-bit sRGB-encoded pixels (row 0 at top,
+   * length `width*height*3`). Uses a float texture when available so stacked tone
+   * ops keep headroom; otherwise falls back to 8-bit. Resizes the buffer to match.
+   */
+  setImage(width: number, height: number, data: Uint16Array): void {
     const gl = this.gl;
-    this.canvas.width = image.naturalWidth;
-    this.canvas.height = image.naturalHeight;
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    this.canvas.width = width;
+    this.canvas.height = height;
+    gl.viewport(0, 0, width, height);
 
     if (this.texture) gl.deleteTexture(this.texture);
     this.texture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    // Flip Y in the buffer (UNPACK_FLIP_Y doesn't apply to ArrayBufferView uploads).
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+
+    const rowLen = width * 3;
+    if (this.floatLinear) {
+      const f = new Float32Array(width * height * 3);
+      for (let oy = 0; oy < height; oy++) {
+        const src = oy * rowLen;
+        const dst = (height - 1 - oy) * rowLen;
+        for (let i = 0; i < rowLen; i++) f[dst + i] = data[src + i] / 65535;
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.FLOAT, f);
+    } else {
+      const b = new Uint8Array(width * height * 3);
+      for (let oy = 0; oy < height; oy++) {
+        const src = oy * rowLen;
+        const dst = (height - 1 - oy) * rowLen;
+        for (let i = 0; i < rowLen; i++) b[dst + i] = data[src + i] >> 8;
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, width, height, 0, gl.RGB, gl.UNSIGNED_BYTE, b);
+    }
 
     this.hasImage = true;
     this.render();
@@ -162,14 +194,15 @@ export class PreviewRenderer {
     gl.uniform1fv(this.uHslLum, this.hslLum);
     gl.uniform1f(this.uHslActive, hslActive);
 
-    // Tone curve: bake the LUT and upload it to unit 1 (skip when identity).
+    // Tone curve on unit 1: keep it bound (seeded identity ramp) so the sampler is
+    // always complete; re-bake + upload the LUT only when the curve is non-identity.
     const curve = this.adjustments.curve;
     const curveActive = curve && !isIdentityCurve(curve) ? 1 : 0;
     gl.uniform1f(this.uCurveActive, curveActive);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.curveTexture);
     if (curveActive) {
       const lut = bakeCurveLut(curve);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, this.curveTexture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, lut.length, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, lut);
     }
 

@@ -44,32 +44,31 @@ fn sidecar_jpeg(raf: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Encode a [`DynamicImage`] to a `data:` URL (base64).
-fn to_data_url(img: &DynamicImage, format: ImageFormat) -> Result<String> {
+/// Encode an image to a JPEG `data:` URL (base64). Thumbnails only — JPEG is
+/// 8-bit, so a 16-bit develop is down-converted first.
+fn to_jpeg_data_url(img: &DynamicImage) -> Result<String> {
+    let rgb8 = DynamicImage::ImageRgb8(img.to_rgb8());
     let mut bytes: Vec<u8> = Vec::new();
-    img.write_to(&mut Cursor::new(&mut bytes), format)
-        .context("encoding preview image")?;
-    let mime = match format {
-        ImageFormat::Png => "image/png",
-        ImageFormat::Jpeg => "image/jpeg",
-        _ => "application/octet-stream",
-    };
+    rgb8.write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
+        .context("encoding thumbnail JPEG")?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    Ok(format!("data:{mime};base64,{b64}"))
+    Ok(format!("data:image/jpeg;base64,{b64}"))
 }
 
-/// A downscaled, sRGB editing preview ready for GPU upload.
+/// A downscaled editing preview ready for GPU upload.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewPayload {
     pub width: u32,
     pub height: u32,
-    /// PNG `data:` URL. The frontend uploads this to a WebGL texture; exposure
-    /// and later adjustments are applied in-shader from the shared definition.
-    pub data_url: String,
+    /// Base64 of the raw RGB pixels as little-endian **u16** (sRGB-encoded,
+    /// 0..=65535, row 0 at top). The frontend uploads this to a float/half-float
+    /// WebGL texture (falling back to 8-bit) — richer than an 8-bit PNG so the
+    /// stacked tone ops don't band on hard pushes.
+    pub data: String,
 }
 
-/// Decode + develop a RAF and return a downscaled PNG preview.
+/// Decode + develop a RAF and return a downscaled 16-bit preview.
 ///
 /// The develop is downscaled to [`PREVIEW_MAX_EDGE`] inside the owned pipeline
 /// (the area-averaging demosaic produces the reduced image directly), so the
@@ -77,11 +76,21 @@ pub struct PreviewPayload {
 pub fn preview(path: &str) -> Result<PreviewPayload> {
     let developed = develop::develop_raf(Path::new(path), PREVIEW_MAX_EDGE)?;
     let (width, height) = (developed.width(), developed.height());
-    let data_url = to_data_url(&developed, ImageFormat::Png)?;
+    let rgb16 = developed.to_rgb16();
+    let samples = rgb16.as_raw(); // &[u16], length = width*height*3
+
+    // Pack as little-endian bytes for a compact, endian-stable transfer.
+    let mut bytes = vec![0u8; samples.len() * 2];
+    for (i, &v) in samples.iter().enumerate() {
+        bytes[i * 2] = (v & 0xff) as u8;
+        bytes[i * 2 + 1] = (v >> 8) as u8;
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+
     Ok(PreviewPayload {
         width,
         height,
-        data_url,
+        data,
     })
 }
 
@@ -99,5 +108,5 @@ pub fn thumbnail(raf_path: &str) -> Result<String> {
         None => develop::develop_raf(raf, THUMB_MAX_EDGE)?,
     };
     // JPEG keeps the thumbnail payload small; thumbnails are not edited.
-    to_data_url(&source, ImageFormat::Jpeg)
+    to_jpeg_data_url(&source)
 }

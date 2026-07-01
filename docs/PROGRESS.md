@@ -7,6 +7,31 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-06-29 (session 4g) — Phase 2 hardening + tag v0.2.0
+
+Phase 2 (full adjustment pipeline) is **complete**. Both hardening items landed and
+Phase 2 is tagged `v0.2.0`.
+
+- **ts-rs type codegen** (`b219ec0`): the TS `Adjustments`/`HslBand`/`CurvePoint`
+  types are now generated from the Rust structs (`#[derive(TS)]` →
+  `src/adjustments/generated/`), so the data shape can't drift (constraint #1).
+  `definition.ts` keeps only runtime helpers. `hsl` → `Vec<HslBand>` for a clean
+  `Array<HslBand>`. Added `npm run gen:types`. ts-rs export_to resolves relative to
+  the source file's dir, so the path is `../../src/adjustments/generated/`.
+- **16-bit float preview** (`41d5a48`): develop emits u16; preview ships raw LE-u16
+  pixels (base64) instead of an 8-bit PNG; renderer uploads a float RGB texture
+  (OES_texture_float + linear, 8-bit fallback) with a manual Y-flip (UNPACK_FLIP_Y
+  doesn't apply to typed-array uploads). User confirmed banding on hard pushes is
+  gone. Follow-up: larger payload than PNG — consider raw-binary IPC later.
+- **Verified:** `cargo test --lib` 21/21 (18 math + 3 bindings); `npm run build`
+  clean; 16-bit preview eyeballed in the app (displays, upright, correct color, no
+  banding).
+
+**Next:** Phase 3 — presets / color profiles (the day-one feature). Storage + apply +
+UI, not new color math. Settle the A-vs-B profile model with the user first.
+
+---
+
 ## 2026-06-29 (session 4f) — Phase 2 step 6: tone curve (point/spline editor)
 
 - Committed step 5 (HSL) as `1a76c8d` after user verification.

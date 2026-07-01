@@ -46,10 +46,14 @@ Desktop-first (PC → macOS later). The authoritative brief is [README.md](READM
 - Regenerate icons: `npm run tauri icon src-tauri/app-icon.png`.
 
 ## Phase status
-- **Phase 1 (skeleton): in place** — import RAFs, thumbnail grid, click→preview,
-  one exposure slider through the shared definition (live GPU re-render), export
-  stub. Awaiting human verification (open the app, confirm the slider works on a
-  real RAF) before starting Phase 2.
+- **Phase 1 (skeleton): done, tagged `v0.1.0`.**
+- **Phase 2 (full adjustment pipeline): done, tagged `v0.2.0`.** All core color ops
+  through the shared definition (exposure, contrast, WB temp/tint, highlights/shadows/
+  whites/blacks, vibrance/saturation, per-hue HSL, point/spline tone curve), live GPU
+  preview == export, on a 16-bit float preview. TS types are ts-rs-generated from the
+  Rust structs (`npm run gen:types`).
+- **Phase 3 (presets / color profiles): next.** Save/apply/manage adjustment stacks
+  as JSON — the day-one "Fuji recipe" feature. See docs/HANDOFF.md.
 
 ## Conventions
 - Git from commit one; conventional commits; tag releases per phase (`v0.1.0`, …).

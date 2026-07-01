@@ -6,16 +6,14 @@
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
 **Last updated:** 2026-06-29 (session 4)
-**Current phase:** Phase 2 (Full adjustment pipeline) — **IN PROGRESS (core ops
-done).** Phase 1 COMPLETE/tagged `v0.1.0`. Committed & app-verified: step 1
-(**contrast**, `a9a3beb`), step 2 (**white balance**, `261c468`), step 3 (**tone
-regions**, `68bfeb8`), step 4 (**vibrance/saturation**, `108d5e7`), step 5 (**HSL**,
-`1a76c8d`). Step 6 (**tone curve** — point/spline editor) is built across the lockstep
-files; frontend builds, 18/18 Rust tests pass. **Awaiting human verification of the
-curve editor before committing step 6.** After that the core color pipeline is
-COMPLETE — only the Phase-2 hardening items remain (ts-rs codegen, 16-bit preview),
-then tag and move to Phase 3.
-**Branch:** `master` (local-only, no remote) · **Last tag:** `v0.1.0`
+**Current phase:** Phase 2 (Full adjustment pipeline) — **COMPLETE, tagged
+`v0.2.0`.** All six core color ops committed & app-verified: contrast (`a9a3beb`),
+white balance (`261c468`), tone regions (`68bfeb8`), vibrance/saturation (`108d5e7`),
+HSL (`1a76c8d`), tone curve (`e95ef14`). Both hardening items done: ts-rs type
+codegen (`b219ec0`) and the 16-bit float preview (`41d5a48`, app-verified — banding
+gone). 18 adjustment-math tests + 3 ts-rs binding tests pass. **Next session: begin
+Phase 3 (Presets / color profiles).**
+**Branch:** `master` (local-only, no remote) · **Last tag:** `v0.2.0`
 
 > **Color-profile / "Fuji recipe" feature → decided: belongs in Phase 3 (Presets).**
 > A profile = a saved `Adjustments` value (JSON). Recommended model is **(A)** a
@@ -43,18 +41,27 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — Phase 2 hardening, then tag
+## ⚠️ START HERE NEXT SESSION — begin Phase 3 (Presets / color profiles)
 
-All six core color ops are built (the tone curve is the last). **Next action:
-human-verify the curve editor, commit step 6. Then the remaining Phase-2 work is
-hardening, not new ops:**
-1. **ts-rs codegen** — generate the TS `Adjustments`/`HslBand`/`CurvePoint` types
-   from the Rust structs so the hand-mirror can't drift (constraint #1). The stack is
-   now big (10 scalars + hsl[8] + curve) — worth doing before Phase 3.
-2. **16-bit / float preview** — the preview texture is still 8-bit `UNSIGNED_BYTE`;
-   stacking this many tone ops will band on hard pushes. Move to a half-float texture.
-Then **tag `v0.2.0`** and start **Phase 3 (Presets / color profiles** — see the
-color-profile decision in Open Risks; a profile = a saved `Adjustments` JSON).
+Phase 2 is DONE and tagged `v0.2.0`: the full color pipeline (exposure → WB → tone
+regions → contrast → tone curve → vibrance/sat → HSL) runs through the single shared
+definition, preview == export, on a 16-bit preview, with the TS types codegen'd from
+Rust. **Next: Phase 3 — save/apply/manage presets, which is the color-profile /
+"Fuji recipe" feature the user asked for on day one.**
+
+First moves for Phase 3:
+1. **Settle the A-vs-B model with the user** (see the callout above + Open Risks):
+   recommend (A) — a profile is a named, editable bundle of the existing
+   `Adjustments` JSON, with a few built-in defaults + "save current as profile" +
+   batch-apply across a selection. (B) a base LUT/film-sim layer is a non-goal.
+2. **Persistence:** presets are plain JSON on disk (brief: "portable, diffable,
+   syncable"). Decide the store location + a Tauri command surface (list/save/delete/
+   apply). The `Adjustments` type already serializes cleanly (serde + ts-rs).
+3. **UI:** a preset library panel; apply-to-one and apply-to-many (multi-select in the
+   grid — note the grid is currently single-select, so selection model needs a look).
+
+Everything a profile bundles already exists; Phase 3 is storage + apply + UI, not new
+color math.
 
 **WB design (decided this session):** temp/tint is a **relative, luminance-preserving
 chroma shift on the developed image** (chosen over a true raw Kelvin WB, which would
@@ -63,7 +70,19 @@ Lightroom treats non-raw files. The develop's base-color accuracy (single D65 ma
 illuminant interpolation) is a **separate** develop-side task, unaffected by — and not
 fixed by — this slider. See "Open risks".
 
-### What landed in step 6 (tone curve) — pending verify + commit
+### What landed in Phase 2 hardening (ts-rs + 16-bit preview)
+- **ts-rs codegen** (`b219ec0`): `Adjustments`/`HslBand`/`CurvePoint` derive `TS`;
+  `cargo test` / `npm run gen:types` writes the TS types to
+  `src/adjustments/generated/`. `definition.ts` now imports those + keeps only the
+  runtime helpers (defaults, ranges, `HSL_BANDS`). `hsl` became `Vec<HslBand>` so the
+  generated type is `Array<HslBand>`. The data shape can no longer drift from Rust.
+- **16-bit float preview** (`41d5a48`): develop emits `Rgb<u16>`; the preview ships
+  raw LE-u16 pixels (base64) not an 8-bit PNG; the renderer uploads a float RGB
+  texture (`OES_texture_float`+linear, 8-bit fallback) with a manual Y-flip. Banding
+  on hard tone pushes is gone. **Follow-up:** the raw payload is bigger than the old
+  PNG — could move to raw-binary Tauri IPC to drop the base64 overhead.
+
+### What landed in step 6 (tone curve)
 - New `CurvePoint { x, y }` type (Rust + TS) and `curve: Vec<CurvePoint>` on
   `Adjustments` (default identity `[(0,0),(1,1)]`). **`Adjustments` is no longer
   `Copy`** (a `Vec` can't be) — it's `Clone`; pass by `&` (already the case).

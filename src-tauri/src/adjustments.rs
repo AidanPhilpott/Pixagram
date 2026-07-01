@@ -5,11 +5,12 @@
 //! exporter read from this definition and apply *identical* math, so what you
 //! see is exactly what you export.
 //!
-//! - The **data shape** is defined here once (`Adjustments`). The TypeScript
-//!   mirror lives in `src/adjustments/definition.ts` and MUST stay field- and
-//!   default-compatible with this struct. (Phase 6+ should codegen the TS from
-//!   this struct via `ts-rs` to make divergence impossible; for Phase 1 the
-//!   single `exposure` field is mirrored by hand and guarded by the doc below.)
+//! - The **data shape** is defined here once (`Adjustments`, `HslBand`,
+//!   `CurvePoint`). The TypeScript types are **generated from these structs by
+//!   ts-rs** (`#[derive(TS)]` → `src/adjustments/generated/`), so they can't
+//!   drift from Rust. Regenerate after any struct change with `npm run gen:types`
+//!   (or `cargo test … export_bindings`); `src/adjustments/definition.ts` adds
+//!   only the runtime helpers (defaults, ranges) on top of the generated types.
 //!
 //! - The **math** is specified in prose in [`apply_pixel`] and implemented twice:
 //!   here in Rust (used by export) and in GLSL (`src/gl/preview.frag.ts`, used by
@@ -38,12 +39,14 @@
 //! keep it identical here and in the GLSL shader.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// One color band of the HSL panel — hue rotation, saturation, and luminance,
 /// each in `[-1.0, +1.0]` (0 = unchanged). There are 8 bands (see `HSL_BANDS` in
 /// the TS mirror); a pixel blends the two whose hues bracket its own.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 #[serde(default, rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/adjustments/generated/")]
 pub struct HslBand {
     pub hue: f32,
     pub sat: f32,
@@ -57,8 +60,9 @@ impl Default for HslBand {
 }
 
 /// One tone-curve control point; both axes in `[0, 1]` (input x → output y, on
-/// the perceptual value). Mirror of the TS `CurvePoint`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// the perceptual value). The TS mirror is generated from this struct by ts-rs.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/adjustments/generated/")]
 pub struct CurvePoint {
     pub x: f32,
     pub y: f32,
@@ -74,8 +78,10 @@ const MAX_CURVE_POINTS: usize = 16;
 /// older/partial preset JSON keeps deserializing as the stack grows.
 ///
 /// Not `Copy`: the tone curve is a `Vec`. Pass by `&` (as `apply_pixel` does).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// The TS mirror is generated from this struct by ts-rs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(default, rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/adjustments/generated/")]
 pub struct Adjustments {
     /// Exposure compensation in stops (EV). 0.0 = unchanged. Range checked by the
     /// UI to roughly [-5, +5]; the math itself is unbounded.
@@ -113,7 +119,8 @@ pub struct Adjustments {
     pub vibrance: f32,
     /// Per-hue HSL adjustments, one entry per color band (red, orange, yellow,
     /// green, aqua, blue, purple, magenta — centers in `hsl_band_adjust`).
-    pub hsl: [HslBand; 8],
+    /// Always length 8 (the UI guarantees it); a `Vec` so ts-rs emits `Array`.
+    pub hsl: Vec<HslBand>,
     /// Tone-curve control points, sorted by `x`, both axes in [0,1]. Default is
     /// the identity line `[(0,0), (1,1)]`. Applied per channel after contrast.
     pub curve: Vec<CurvePoint>,
@@ -132,7 +139,7 @@ impl Default for Adjustments {
             blacks: 0.0,
             saturation: 0.0,
             vibrance: 0.0,
-            hsl: [HslBand { hue: 0.0, sat: 0.0, lum: 0.0 }; 8],
+            hsl: vec![HslBand { hue: 0.0, sat: 0.0, lum: 0.0 }; 8],
             curve: vec![
                 CurvePoint { x: 0.0, y: 0.0 },
                 CurvePoint { x: 1.0, y: 1.0 },
@@ -289,7 +296,7 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
 /// yellow 60, green 120, aqua 180, blue 240, purple 270, magenta 300 (wrapping
 /// 300→360 back to red). **Segment thresholds MUST match the GLSL shader.**
 #[inline]
-fn hsl_band_adjust(h: f32, hsl: &[HslBand; 8]) -> (f32, f32, f32) {
+fn hsl_band_adjust(h: f32, hsl: &[HslBand]) -> (f32, f32, f32) {
     let (i0, i1, t) = if h < 30.0 {
         (0, 1, h / 30.0)
     } else if h < 60.0 {
@@ -315,11 +322,9 @@ fn hsl_band_adjust(h: f32, hsl: &[HslBand; 8]) -> (f32, f32, f32) {
 /// band is neutral. Adjustments fade out on near-neutral pixels (no real hue).
 /// **Mirror of `applyHsl` in the GLSL shader.**
 #[inline]
-fn apply_hsl(rgb: [f32; 3], hsl: &[HslBand; 8]) -> [f32; 3] {
-    if hsl
-        .iter()
-        .all(|b| b.hue == 0.0 && b.sat == 0.0 && b.lum == 0.0)
-    {
+fn apply_hsl(rgb: [f32; 3], hsl: &[HslBand]) -> [f32; 3] {
+    // hsl_band_adjust indexes bands 0..=7, so anything shorter is treated as a no-op.
+    if hsl.len() < 8 || hsl.iter().all(|b| b.hue == 0.0 && b.sat == 0.0 && b.lum == 0.0) {
         return rgb;
     }
     let (h, s, l) = rgb_to_hsl(rgb);
@@ -628,7 +633,7 @@ mod tests {
     #[test]
     fn hsl_targets_only_the_matching_band() {
         // Fully desaturate the red band; a red pixel goes grey, a blue one is left.
-        let mut hsl = [HslBand::default(); 8];
+        let mut hsl = vec![HslBand::default(); 8];
         hsl[0].sat = -1.0; // red band
         let adj = Adjustments { hsl, ..Default::default() };
 

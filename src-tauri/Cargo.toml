@@ -21,6 +21,10 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Generate the TypeScript mirror of the shared adjustment types from the Rust
+# structs so the hand-written mirror can't drift (constraint #1). `cargo test`
+# writes the bindings (see `npm run gen:types`).
+ts-rs = "=10.1.0"
 
 # Raw decode + X-Trans (Markesteijn) demosaic. Pinned to match the `image`
 # version rawler re-exports so DynamicImage unifies across the two crates.

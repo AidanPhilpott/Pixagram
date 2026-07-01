@@ -25,8 +25,11 @@ Desktop-first (PC → macOS later). The authoritative brief is [README.md](READM
    The TS mirror is [`src/adjustments/definition.ts`](src/adjustments/definition.ts)
    and the GPU math is [`src/gl/preview.frag.ts`](src/gl/preview.frag.ts). **All
    three must stay in lockstep** — preview math == export math (WYSIWYG). When you
-   add a field/operation, update Rust `apply_pixel`, the shader, and the TS type
-   together. (Phase 6+: codegen the TS type via `ts-rs` to enforce this.)
+   add a field/operation, update Rust `apply_pixel`, the shader, and the TS math
+   together. The TS **types** are codegen'd from the Rust structs via `ts-rs`
+   (`src/adjustments/generated/`); run `npm run gen:types` after changing a struct
+   so the data shape can't drift. (Codegen covers the shape only — the shader and
+   `apply_pixel` math are still mirrored by hand.)
 2. **X-Trans-aware decode + sRGB tagging.** Handled by rawler's `RawDevelop`.
 
 ## Performance rules (architecture, not polish)

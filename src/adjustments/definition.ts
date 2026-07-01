@@ -1,33 +1,26 @@
 /**
- * The shared adjustment definition — TypeScript MIRROR.
+ * The shared adjustment definition — TypeScript side.
  *
- * The canonical source of truth is the Rust struct in
- * `src-tauri/src/adjustments.rs`. This file MUST stay field- and
- * default-compatible with it: same field names (camelCase on both sides via
- * serde `rename_all`), same defaults, same numeric semantics.
+ * The TYPES (`Adjustments`, `HslBand`, `CurvePoint`) are GENERATED from the Rust
+ * structs in `src-tauri/src/adjustments.rs` by ts-rs — see `./generated/`. They
+ * can't drift from Rust by construction (constraint #1). Regenerate them with
+ * `npm run gen:types` after changing the Rust structs.
  *
- * This object is sent to Rust verbatim on export and fed to the GPU preview, so
- * the two pipelines never diverge. The matching pixel math lives in the GLSL
- * fragment shader (`src/gl/preview.frag.ts`) and in Rust `apply_pixel`.
- *
- * Phase 6+: replace this hand-written mirror with `ts-rs`-generated types so
- * divergence becomes impossible.
+ * This file adds only the runtime helpers TS needs on top of those types
+ * (defaults, band metadata, UI ranges). The matching pixel math lives in Rust
+ * `apply_pixel` and the GLSL shader (`src/gl/preview.frag.ts`).
  */
+import type { Adjustments } from "./generated/Adjustments";
+import type { CurvePoint } from "./generated/CurvePoint";
+import type { HslBand } from "./generated/HslBand";
 
-/** One color band of the HSL panel. Mirror of Rust `HslBand`. */
-export interface HslBand {
-  /** Hue rotation in [-1, 1]. 0 = unchanged. */
-  hue: number;
-  /** Saturation in [-1, 1]. 0 = unchanged. */
-  sat: number;
-  /** Luminance in [-1, 1]. 0 = unchanged. */
-  lum: number;
-}
+export type { Adjustments, CurvePoint, HslBand };
 
 /**
  * The 8 HSL color bands, in order. `hue` is the band centre in degrees, used
  * for the swatch colour and label — the per-pixel band math lives in the Rust
- * `hsl_band_adjust` / GLSL `applyHsl` (segment thresholds must match).
+ * `hsl_band_adjust` / GLSL `applyHsl` (segment thresholds must match). The count
+ * and order must line up with the Rust band centers.
  */
 export const HSL_BANDS = [
   { name: "Red", hue: 0 },
@@ -40,46 +33,12 @@ export const HSL_BANDS = [
   { name: "Magenta", hue: 300 },
 ] as const;
 
-/** One tone-curve control point; both axes in [0, 1]. Mirror of Rust `CurvePoint`. */
-export interface CurvePoint {
-  x: number;
-  y: number;
-}
-
 /** The neutral tone curve — the identity diagonal. */
 export function identityCurve(): CurvePoint[] {
   return [
     { x: 0, y: 0 },
     { x: 1, y: 1 },
   ];
-}
-
-/** A complete non-destructive adjustment stack for one photo. */
-export interface Adjustments {
-  /** Exposure compensation in stops (EV). 0 = unchanged. UI range ~[-5, +5]. */
-  exposure: number;
-  /** Contrast in [-1, 1]. 0 = unchanged. Shown to the user as [-100, +100]. */
-  contrast: number;
-  /** WB temperature in [-1, 1]. 0 = neutral; + warms, - cools. UI [-100, +100]. */
-  temperature: number;
-  /** WB tint in [-1, 1]. 0 = neutral; + magenta, - green. UI [-100, +100]. */
-  tint: number;
-  /** Highlights in [-1, 1]. 0 = unchanged; + brightens, - recovers. UI [-100, +100]. */
-  highlights: number;
-  /** Shadows in [-1, 1]. 0 = unchanged; + lifts, - deepens. UI [-100, +100]. */
-  shadows: number;
-  /** Whites in [-1, 1]. 0 = unchanged; + brightens the near-white end. UI [-100, +100]. */
-  whites: number;
-  /** Blacks in [-1, 1]. 0 = unchanged; + lifts / - crushes near-black. UI [-100, +100]. */
-  blacks: number;
-  /** Saturation in [-1, 1]. 0 = unchanged; -1 greyscale, +1 doubles chroma. UI [-100, +100]. */
-  saturation: number;
-  /** Vibrance in [-1, 1]. 0 = unchanged; like saturation, weighted to muted colors. UI [-100, +100]. */
-  vibrance: number;
-  /** Per-hue HSL adjustments, one per `HSL_BANDS` entry (length 8). */
-  hsl: HslBand[];
-  /** Tone-curve control points, sorted by x, both axes [0,1]. Default = identity. */
-  curve: CurvePoint[];
 }
 
 /** The neutral stack — equivalent to Rust's `Adjustments::default()`. */

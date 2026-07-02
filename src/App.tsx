@@ -20,7 +20,7 @@ import {
   listImages,
   listPresets,
   loadStacks,
-  pickRafFiles,
+  pickRawFiles,
   renamePreset,
   savePreset,
   saveStacks,
@@ -177,7 +177,7 @@ export function App() {
   const handleImport = useCallback(async () => {
     try {
       setStatus(null);
-      const paths = await pickRafFiles();
+      const paths = await pickRawFiles();
       if (paths.length === 0) return;
       setImporting(true);
       const imported = await listImages(paths);
@@ -508,7 +508,7 @@ export function App() {
         </div>
         <div className="topbar__actions">
           <button className="btn" onClick={handleImport} disabled={importing}>
-            {importing ? "Importing…" : "Import RAF…"}
+            {importing ? "Importing…" : "Import RAW…"}
           </button>
           <button
             className="btn btn--accent"

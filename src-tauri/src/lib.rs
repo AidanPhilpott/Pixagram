@@ -30,7 +30,7 @@ pub fn develop_for_test(
     path: &Path,
     max_edge: u32,
 ) -> anyhow::Result<image::DynamicImage> {
-    develop::develop_raf(path, max_edge)
+    develop::develop_raw(path, max_edge)
 }
 
 /// One entry in the working-set thumbnail grid.

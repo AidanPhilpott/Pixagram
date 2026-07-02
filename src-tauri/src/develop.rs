@@ -34,6 +34,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use image::{DynamicImage, ImageBuffer, Rgb};
 use rawler::rawimage::{RawImage, RawImageData};
+use rawler::CFA;
 
 /// sRGB (linear, D65) primaries → CIE XYZ. Used to build the camera→sRGB matrix.
 const SRGB_TO_XYZ: [[f32; 3]; 3] = [
@@ -53,12 +54,41 @@ const BASELINE_EXPOSURE_EV: f32 = 1.7;
 
 /// Decode a raw file and develop it to a downscaled sRGB image whose longest edge
 /// is approximately `max_edge`. This is the single owned color path used by both
-/// the editing preview and the (sidecar-less) thumbnail fallback.
-pub fn develop_raf(path: &Path, max_edge: u32) -> Result<DynamicImage> {
+/// the editing preview and the (sidecar-less) thumbnail fallback. Works for any
+/// rawler-supported format — every stage below is driven by the file's own
+/// metadata and CFA pattern (X-Trans 6×6 or Bayer 2×2, any phase).
+pub fn develop_raw(path: &Path, max_edge: u32) -> Result<DynamicImage> {
     let raw = rawler::decode_file(path)
         .map_err(|e| anyhow!("raw decode failed for {}: {e}", path.display()))?;
     develop_rawimage(&raw, max_edge)
         .ok_or_else(|| anyhow!("develop produced no image for {}", path.display()))
+}
+
+/// Everything the develop core needs, extracted from the raw file's metadata.
+/// Split out from `RawImage` so unit tests can drive the exact production
+/// pipeline with synthetic mosaics (see the tests at the bottom of this file).
+struct DevelopParams<'a> {
+    /// Raw sensor values; `stride` values per row (full sensor, incl. borders).
+    data: &'a [u16],
+    stride: usize,
+    /// Visible (non-masked) region: origin + size, in absolute sensor coords.
+    x0: usize,
+    y0: usize,
+    rw: usize,
+    rh: usize,
+    /// CFA pattern; `color_at` is absolute-sensor-indexed (see INSIGHTS).
+    cfa: &'a CFA,
+    /// White-balance gains, green-normalized.
+    wb: [f32; 3],
+    /// camera-native RGB → linear sRGB matrix.
+    cam2srgb: [[f32; 3]; 3],
+    /// Per-position black-level pattern (`bw`×`bh`, repeating) + white level.
+    black_levels: Vec<f32>,
+    bw: usize,
+    bh: usize,
+    white: f32,
+    /// Flat linear gain (baseline exposure, `2^EV`).
+    gain: f32,
 }
 
 fn develop_rawimage(raw: &RawImage, max_edge: u32) -> Option<DynamicImage> {
@@ -67,8 +97,6 @@ fn develop_rawimage(raw: &RawImage, max_edge: u32) -> Option<DynamicImage> {
         // Float raws (some DNGs) would need a parallel path; not our cameras yet.
         RawImageData::Float(_) => return None,
     };
-    let stride = raw.width; // full sensor row stride, including masked borders
-    let cfa = &raw.camera.cfa;
 
     // Visible region: the non-masked active area excludes optical-black borders.
     // Working inside it keeps black bars and dead pixels out of the develop.
@@ -95,23 +123,50 @@ fn develop_rawimage(raw: &RawImage, max_edge: u32) -> Option<DynamicImage> {
 
     // Per-position black level (a small repeating pattern) and the white level.
     let bl = &raw.blacklevel;
-    let (bw, bh) = (bl.width.max(1), bl.height.max(1));
-    let black_levels: Vec<f32> = bl.levels.iter().map(|r| r.as_f32()).collect();
+    let params = DevelopParams {
+        data,
+        stride: raw.width, // full sensor row stride, including masked borders
+        x0,
+        y0,
+        rw,
+        rh,
+        cfa: &raw.camera.cfa,
+        wb,
+        cam2srgb,
+        black_levels: bl.levels.iter().map(|r| r.as_f32()).collect(),
+        bw: bl.width.max(1),
+        bh: bl.height.max(1),
+        white: raw.whitelevel.as_vec().first().copied().unwrap_or(65535.0),
+        gain: 2.0_f32.powf(BASELINE_EXPOSURE_EV),
+    };
+    Some(DynamicImage::ImageRgb16(develop_mosaic(&params, max_edge)))
+}
+
+/// The develop core: area-averaging demosaic → WB → color matrix → gain → gamma.
+/// CFA-generic — the footprint expansion and `color_at` sampling adapt to any
+/// repeating pattern (Bayer 2×2 in all four phases, X-Trans 6×6).
+fn develop_mosaic(p: &DevelopParams, max_edge: u32) -> ImageBuffer<Rgb<u16>, Vec<u16>> {
+    let DevelopParams {
+        data,
+        stride,
+        x0,
+        y0,
+        rw,
+        rh,
+        cfa,
+        wb,
+        cam2srgb,
+        white,
+        gain,
+        ..
+    } = *p;
     let black_at = |ar: usize, ac: usize| -> f32 {
-        if black_levels.is_empty() {
+        if p.black_levels.is_empty() {
             0.0
         } else {
-            black_levels[((ar % bh) * bw + (ac % bw)) % black_levels.len()]
+            p.black_levels[((ar % p.bh) * p.bw + (ac % p.bw)) % p.black_levels.len()]
         }
     };
-    let white = raw
-        .whitelevel
-        .as_vec()
-        .first()
-        .copied()
-        .unwrap_or(65535.0);
-
-    let gain = 2.0_f32.powf(BASELINE_EXPOSURE_EV);
 
     // Output size: scale the longest visible edge down to ~max_edge.
     let scale = (rw.max(rh) as f32 / max_edge as f32).max(1.0);
@@ -127,15 +182,18 @@ fn develop_rawimage(raw: &RawImage, max_edge: u32) -> Option<DynamicImage> {
     // the GPU preview far more tonal headroom — stacked tone ops won't band.
     let mut out: ImageBuffer<Rgb<u16>, Vec<u16>> = ImageBuffer::new(out_w, out_h);
     for oy in 0..out_h {
-        let mut sy0 = (oy as f32 * scale) as usize;
-        let mut sy1 = (((oy + 1) as f32 * scale) as usize).max(sy0 + 1);
+        // Clamp to the visible region: `out_h = round(rh/scale)` can round UP,
+        // putting the last row's window one sensor row past `rh` — an overflow
+        // on cameras whose active area runs to the sensor edge (no masked slack).
+        let mut sy0 = ((oy as f32 * scale) as usize).min(rh - 1);
+        let mut sy1 = (((oy + 1) as f32 * scale) as usize).clamp(sy0 + 1, rh);
         if sy1 - sy0 < period_y {
             sy1 = (sy0 + period_y).min(rh);
             sy0 = sy1.saturating_sub(period_y);
         }
         for ox in 0..out_w {
-            let mut sx0 = (ox as f32 * scale) as usize;
-            let mut sx1 = (((ox + 1) as f32 * scale) as usize).max(sx0 + 1);
+            let mut sx0 = ((ox as f32 * scale) as usize).min(rw - 1);
+            let mut sx1 = (((ox + 1) as f32 * scale) as usize).clamp(sx0 + 1, rw);
             if sx1 - sx0 < period_x {
                 sx1 = (sx0 + period_x).min(rw);
                 sx0 = sx1.saturating_sub(period_x);
@@ -179,7 +237,7 @@ fn develop_rawimage(raw: &RawImage, max_edge: u32) -> Option<DynamicImage> {
         }
     }
 
-    Some(DynamicImage::ImageRgb16(out))
+    out
 }
 
 /// Choose the camera color matrix (XYZ→camera). Prefer the D65 illuminant — the
@@ -254,4 +312,158 @@ fn mat_inv(m: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
             (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * inv_det,
         ],
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    /// A real Fuji X-Trans 6×6 pattern (from rawler's camera database).
+    const XTRANS: &str = "RBGBRGGGRGGBGGBGGRBRGRBGGGBGGRGGRGGB";
+
+    /// Neutral develop params over the whole mosaic: unity WB, identity matrix,
+    /// zero black, white = 1000, no baseline gain. Isolates the demosaic.
+    fn neutral<'a>(data: &'a [u16], w: usize, h: usize, cfa: &'a CFA) -> DevelopParams<'a> {
+        DevelopParams {
+            data,
+            stride: w,
+            x0: 0,
+            y0: 0,
+            rw: w,
+            rh: h,
+            cfa,
+            wb: [1.0; 3],
+            cam2srgb: IDENTITY,
+            black_levels: vec![0.0],
+            bw: 1,
+            bh: 1,
+            white: 1000.0,
+            gain: 1.0,
+        }
+    }
+
+    /// Build a mosaic where every sensor site holds a per-CFA-color value.
+    fn mosaic_per_color(w: usize, h: usize, cfa: &CFA, vals: [u16; 3]) -> Vec<u16> {
+        let mut data = vec![0u16; w * h];
+        for r in 0..h {
+            for c in 0..w {
+                data[r * w + c] = vals[cfa.color_at(r, c)];
+            }
+        }
+        data
+    }
+
+    fn expected_u16(linear: f32) -> u16 {
+        (linear_to_srgb(linear) * 65535.0).round() as u16
+    }
+
+    #[test]
+    fn bayer_flat_grey_stays_flat_grey() {
+        // Every RGGB site reads 500/1000 → every output pixel is mid-grey.
+        let cfa = CFA::new("RGGB");
+        let data = mosaic_per_color(8, 8, &cfa, [500, 500, 500]);
+        let out = develop_mosaic(&neutral(&data, 8, 8, &cfa), 4);
+        let want = expected_u16(0.5);
+        for px in out.pixels() {
+            for ch in px.0 {
+                assert!(
+                    ch.abs_diff(want) <= 1,
+                    "expected flat grey {want}, got {ch}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bayer_known_pattern_produces_expected_averages() {
+        // 4×4 RGGB collapsed to one output pixel: each channel must be the mean
+        // of exactly its own sites. R sites get 100/200/300/400 (mean 250), all
+        // G sites 500, all B sites 800.
+        let cfa = CFA::new("RGGB");
+        let mut data = mosaic_per_color(4, 4, &cfa, [0, 500, 800]);
+        let r_vals = [100u16, 200, 300, 400];
+        let mut next_r = 0;
+        for r in 0..4 {
+            for c in 0..4 {
+                if cfa.color_at(r, c) == 0 {
+                    data[r * 4 + c] = r_vals[next_r];
+                    next_r += 1;
+                }
+            }
+        }
+        assert_eq!(next_r, 4, "an RGGB 4×4 tile has exactly 4 red sites");
+
+        let out = develop_mosaic(&neutral(&data, 4, 4, &cfa), 1);
+        assert_eq!(out.dimensions(), (1, 1));
+        let px = out.get_pixel(0, 0).0;
+        assert!(px[0].abs_diff(expected_u16(0.25)) <= 1, "R mean: {}", px[0]);
+        assert!(px[1].abs_diff(expected_u16(0.5)) <= 1, "G mean: {}", px[1]);
+        assert!(px[2].abs_diff(expected_u16(0.8)) <= 1, "B mean: {}", px[2]);
+    }
+
+    #[test]
+    fn bayer_all_four_phases_agree() {
+        // The same per-color scene must develop identically regardless of which
+        // corner of the 2×2 tile holds red — `color_at` carries the phase.
+        let outs: Vec<_> = ["RGGB", "BGGR", "GRBG", "GBRG"]
+            .iter()
+            .map(|pat| {
+                let cfa = CFA::new(pat);
+                let data = mosaic_per_color(8, 8, &cfa, [200, 500, 800]);
+                develop_mosaic(&neutral(&data, 8, 8, &cfa), 4)
+            })
+            .collect();
+        for out in &outs[1..] {
+            assert_eq!(
+                out.as_raw(),
+                outs[0].as_raw(),
+                "Bayer phase variant changed the developed output"
+            );
+        }
+    }
+
+    #[test]
+    fn rounded_up_output_grid_stays_in_bounds() {
+        // `out_h = round(rh/scale)` rounds UP here (7/4.5 = 1.56 → 2), putting
+        // the last row's un-clamped window one sensor row past the active area.
+        // Cameras with no masked slack below the frame (Sony A7II) crashed on
+        // this before the clamp; Fuji never did (its borders absorbed the read).
+        let cfa = CFA::new("RGGB");
+        let data = mosaic_per_color(9, 7, &cfa, [500, 500, 500]);
+        let out = develop_mosaic(&neutral(&data, 9, 7, &cfa), 2);
+        assert_eq!(out.dimensions(), (2, 2));
+    }
+
+    #[test]
+    fn xtrans_flat_grey_stays_flat_grey() {
+        // The same core handles the 6×6 X-Trans pattern (footprints expand to
+        // a full tile so all three colors are always present).
+        let cfa = CFA::new(XTRANS);
+        let data = mosaic_per_color(12, 12, &cfa, [500, 500, 500]);
+        let out = develop_mosaic(&neutral(&data, 12, 12, &cfa), 2);
+        let want = expected_u16(0.5);
+        for px in out.pixels() {
+            for ch in px.0 {
+                assert!(ch.abs_diff(want) <= 1, "expected {want}, got {ch}");
+            }
+        }
+    }
+
+    #[test]
+    fn black_level_is_subtracted_before_normalize() {
+        // Sites read 600 with black 100, white 1100 → (600−100)/1000 = 0.5.
+        let cfa = CFA::new("RGGB");
+        let data = mosaic_per_color(4, 4, &cfa, [600, 600, 600]);
+        let mut p = neutral(&data, 4, 4, &cfa);
+        p.black_levels = vec![100.0];
+        p.white = 1100.0;
+        let out = develop_mosaic(&p, 2);
+        let want = expected_u16(0.5);
+        for px in out.pixels() {
+            for ch in px.0 {
+                assert!(ch.abs_diff(want) <= 1, "expected {want}, got {ch}");
+            }
+        }
+    }
 }

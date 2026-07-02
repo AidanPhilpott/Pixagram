@@ -24,23 +24,32 @@ export interface PreviewPayload {
   data: string;
 }
 
-/** Open a native file picker for one or many Fujifilm RAF files. */
-export async function pickRafFiles(): Promise<string[]> {
+/** Raw formats the develop pipeline supports (rawler-decoded, Bayer or X-Trans). */
+const RAW_EXTENSIONS = ["raf", "nef", "cr2", "cr3", "arw", "dng", "orf", "rw2", "pef"];
+
+/** Open a native file picker for one or many camera raw files. */
+export async function pickRawFiles(): Promise<string[]> {
   const selection = await open({
     multiple: true,
     directory: false,
-    filters: [{ name: "Fujifilm RAW", extensions: ["raf", "RAF"] }],
+    filters: [
+      {
+        name: "Camera RAW",
+        // Both cases: some platforms' pickers match extensions case-sensitively.
+        extensions: [...RAW_EXTENSIONS, ...RAW_EXTENSIONS.map((e) => e.toUpperCase())],
+      },
+    ],
   });
   if (selection == null) return [];
   return Array.isArray(selection) ? selection : [selection];
 }
 
-/** Build thumbnail-grid entries from selected RAF paths. */
+/** Build thumbnail-grid entries from selected raw paths. */
 export function listImages(paths: string[]): Promise<ImageEntry[]> {
   return invoke<ImageEntry[]>("list_images", { paths });
 }
 
-/** Decode + develop one RAF into a downscaled sRGB preview. */
+/** Decode + develop one raw file into a downscaled sRGB preview. */
 export function decodePreview(path: string): Promise<PreviewPayload> {
   return invoke<PreviewPayload>("decode_preview", { path });
 }

@@ -1,17 +1,20 @@
-//! RAF decode + preview/thumbnail generation.
+//! Raw decode + preview/thumbnail generation. (Named `raf` for the Fujifilm-RAF
+//! origin, but format-generic: any raw rawler decodes — NEF, CR2/CR3, ARW, DNG,
+//! ORF, RW2, PEF, … — flows through the same paths.)
 //!
 //! Constraint #2 from the brief: X-Trans-aware decode. The actual color develop
 //! lives in [`crate::develop`] — an owned, camera-general pipeline that reads the
 //! raw mosaic + metadata and demosaics/white-balances/matrixes it ourselves,
 //! because rawler 0.7.2's demosaic distorts X-Trans channel balance (see that
 //! module and docs/INSIGHTS.md). This module is the thin I/O layer around it:
-//! sidecar discovery, downscaled-image encoding, and `data:` URL packaging.
+//! sidecar/embedded-JPEG discovery, downscaled-image encoding, and `data:` URL
+//! packaging.
 //!
 //! Performance (brief's architecture rules):
-//! - Thumbnails come from the camera JPEG sidecar when present (the user shoots
-//!   RAW+JPEG), falling back to a downscaled owned develop. Browsing never decodes
-//!   a full RAF when a JPEG is available.
-//! - The editing preview decodes the RAF lazily and is downscaled *inside* the
+//! - Thumbnails never develop the raw if a camera JPEG exists: sidecar `.JPG`
+//!   first (Fuji RAW+JPEG shooters), then the preview JPEG embedded in the raw
+//!   itself (nearly every format carries one), and only then a downscaled develop.
+//! - The editing preview decodes the raw lazily and is downscaled *inside* the
 //!   develop (the demosaic emits the reduced image directly), so a full 40MP
 //!   buffer never crosses the IPC boundary.
 
@@ -21,6 +24,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use base64::Engine;
 use image::{DynamicImage, ImageFormat};
+use rawler::decoders::RawDecodeParams;
+use rawler::rawsource::RawSource;
 
 use crate::develop;
 
@@ -31,10 +36,10 @@ const PREVIEW_MAX_EDGE: u32 = 2048;
 /// Longest-edge cap for grid thumbnails, in pixels.
 const THUMB_MAX_EDGE: u32 = 384;
 
-/// Find a camera-JPEG sidecar (`.JPG`/`.JPEG`, any case) next to a RAF.
-fn sidecar_jpeg(raf: &Path) -> Option<PathBuf> {
-    let stem = raf.file_stem()?;
-    let dir = raf.parent()?;
+/// Find a camera-JPEG sidecar (`.JPG`/`.JPEG`, any case) next to a raw file.
+fn sidecar_jpeg(raw: &Path) -> Option<PathBuf> {
+    let stem = raw.file_stem()?;
+    let dir = raw.parent()?;
     for ext in ["JPG", "jpg", "JPEG", "jpeg"] {
         let candidate = dir.join(format!("{}.{}", stem.to_string_lossy(), ext));
         if candidate.is_file() {
@@ -42,6 +47,24 @@ fn sidecar_jpeg(raf: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Extract the preview JPEG embedded in the raw file itself, if the format's
+/// decoder exposes one. Non-Fuji cameras rarely ship a sidecar, but nearly every
+/// raw format embeds a camera-rendered JPEG — decoding it is far cheaper than a
+/// raw develop, so this is the thumbnail path of choice after the sidecar.
+/// Tries the decoder's images smallest-first (thumbnail → preview → full).
+fn embedded_jpeg(raw: &Path) -> Option<DynamicImage> {
+    let source = RawSource::new(raw).ok()?;
+    let decoder = rawler::get_decoder(&source).ok()?;
+    let params = RawDecodeParams::default();
+    if let Ok(Some(img)) = decoder.thumbnail_image(&source, &params) {
+        return Some(img);
+    }
+    if let Ok(Some(img)) = decoder.preview_image(&source, &params) {
+        return Some(img);
+    }
+    decoder.full_image(&source, &params).ok().flatten()
 }
 
 /// Encode an image to a JPEG `data:` URL (base64). Thumbnails only — JPEG is
@@ -68,13 +91,13 @@ pub struct PreviewPayload {
     pub data: String,
 }
 
-/// Decode + develop a RAF and return a downscaled 16-bit preview.
+/// Decode + develop a raw file and return a downscaled 16-bit preview.
 ///
 /// The develop is downscaled to [`PREVIEW_MAX_EDGE`] inside the owned pipeline
 /// (the area-averaging demosaic produces the reduced image directly), so the
 /// buffer never crosses IPC at full sensor resolution.
 pub fn preview(path: &str) -> Result<PreviewPayload> {
-    let developed = develop::develop_raf(Path::new(path), PREVIEW_MAX_EDGE)?;
+    let developed = develop::develop_raw(Path::new(path), PREVIEW_MAX_EDGE)?;
     let (width, height) = (developed.width(), developed.height());
     let rgb16 = developed.to_rgb16();
     let samples = rgb16.as_raw(); // &[u16], length = width*height*3
@@ -96,16 +119,20 @@ pub fn preview(path: &str) -> Result<PreviewPayload> {
 
 /// Produce a small JPEG thumbnail `data:` URL for the grid.
 ///
-/// Prefers the camera-JPEG sidecar for speed; falls back to a downscaled RAF
-/// develop when there is no sidecar.
-pub fn thumbnail(raf_path: &str) -> Result<String> {
-    let raf = Path::new(raf_path);
-    let source = match sidecar_jpeg(raf) {
+/// Cheapest source wins: camera-JPEG sidecar (Fuji RAW+JPEG shooters), then the
+/// preview JPEG embedded in the raw itself (most formats carry one), and only
+/// as a last resort a downscaled raw develop.
+pub fn thumbnail(raw_path: &str) -> Result<String> {
+    let raw = Path::new(raw_path);
+    let source = match sidecar_jpeg(raw) {
         Some(jpg) => image::open(&jpg)
             .with_context(|| format!("opening sidecar JPEG {}", jpg.display()))?
             .thumbnail(THUMB_MAX_EDGE, THUMB_MAX_EDGE),
-        // No sidecar: develop the raw straight to thumbnail size via the owned path.
-        None => develop::develop_raf(raf, THUMB_MAX_EDGE)?,
+        None => match embedded_jpeg(raw) {
+            Some(img) => img.thumbnail(THUMB_MAX_EDGE, THUMB_MAX_EDGE),
+            // No sidecar, no embedded preview: develop straight to thumb size.
+            None => develop::develop_raw(raw, THUMB_MAX_EDGE)?,
+        },
     };
     // JPEG keeps the thumbnail payload small; thumbnails are not edited.
     to_jpeg_data_url(&source)

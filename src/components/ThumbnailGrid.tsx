@@ -22,7 +22,7 @@ export function ThumbnailGrid({
     return (
       <div className="grid grid--empty">
         <p>No photos yet</p>
-        <span>Import RAFs to build your working set</span>
+        <span>Import RAW files to build your working set</span>
       </div>
     );
   }

@@ -176,10 +176,10 @@ export function Preview({ preview, adjustments, loading, onRotate }: PreviewProp
       {!preview && !loading && !error && (
         <div className="preview__empty">
           <p>Select a photo to edit</p>
-          <span>Decoded with X-Trans (Markesteijn) demosaicing</span>
+          <span>RAF, NEF, CR2/CR3, ARW, DNG, ORF, RW2, PEF</span>
         </div>
       )}
-      {loading && <div className="preview__loading">Decoding RAF…</div>}
+      {loading && <div className="preview__loading">Decoding RAW…</div>}
       <canvas
         ref={canvasRef}
         className="preview__canvas"

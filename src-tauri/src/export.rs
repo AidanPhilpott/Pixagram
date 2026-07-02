@@ -6,6 +6,10 @@
 //! definition that drives the GPU preview also arrives in Rust and is applied by
 //! the same shared math (`adjustments::apply_pixel`). Real JPEG/border/EXIF
 //! export is Phase 5.
+//!
+//! Phase 5 per-pixel order: `apply_pixel` → `adjustments::apply_grain(x, y)`
+//! (grain is spatial, on top of the final color) → `apply_rotation` once per
+//! image. The GPU preview applies the same three stages in the same order.
 
 use anyhow::Result;
 use image::DynamicImage;

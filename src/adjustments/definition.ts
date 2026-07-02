@@ -56,6 +56,10 @@ export function defaultAdjustments(): Adjustments {
     vibrance: 0,
     hsl: HSL_BANDS.map(() => ({ hue: 0, sat: 0, lum: 0 })),
     curve: identityCurve(),
+    colorChrome: 0,
+    colorChromeBlue: 0,
+    grain: 0,
+    grainSize: 0,
     rotation: 0,
   };
 }
@@ -77,3 +81,6 @@ export const COLOR_RANGE = { min: -1, max: 1, step: 0.01 } as const;
 
 /** UI bounds for the per-band HSL sliders (stored in [-1, 1]). */
 export const HSL_RANGE = { min: -1, max: 1, step: 0.01 } as const;
+
+/** UI bounds for the effect sliders (grain, color chrome — stored in [0, 1]). */
+export const EFFECT_RANGE = { min: 0, max: 1, step: 0.01 } as const;

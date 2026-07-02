@@ -8,7 +8,9 @@
  * Pipeline: sRGB -> linear, exposure (2^EV), white balance (luminance-preserving
  * chroma shift), linear -> sRGB, tone regions (highlights/shadows/whites/blacks),
  * contrast (S-curve around mid-grey 0.5), tone curve (LUT), saturation/vibrance,
- * HSL, clip.
+ * HSL, color chrome, clip — then grain (spatial, mirror of Rust `apply_grain`;
+ * computed at preview resolution, so it matches the export in character, not
+ * pixel-for-pixel — the one deliberate WYSIWYG relaxation, like rotation's note).
  */
 export const FRAGMENT_SHADER = /* glsl */ `
 precision highp float;
@@ -31,6 +33,11 @@ uniform float uHslSat[8];   // per-band saturation [-1, 1]
 uniform float uHslLum[8];   // per-band luminance [-1, 1]
 uniform float uHslActive;   // 1.0 if any HSL band is non-neutral, else 0.0
 uniform float uCurveActive; // 1.0 if the tone curve isn't the identity, else 0.0
+uniform float uColorChrome;     // [0, 1], color-chrome effect strength
+uniform float uColorChromeBlue; // [0, 1], blue-weighted color-chrome strength
+uniform float uGrain;       // [0, 1], film-grain amount
+uniform float uGrainSize;   // [0, 1], grain cell size (0 = 1px, 1 = 3px)
+uniform vec2 uTexSize;      // image texture size in pixels (grain coordinates)
 
 // Full-scale chroma strengths — MUST match WB_*_STRENGTH in adjustments.rs.
 const float WB_TEMP_STRENGTH = 0.3;
@@ -40,6 +47,11 @@ const float TONE_STRENGTH = 0.2;
 // HSL slider strengths — MUST match HSL_*_STRENGTH/DEG in adjustments.rs.
 const float HSL_HUE_DEG = 30.0;
 const float HSL_LUM_STRENGTH = 0.5;
+// Color-chrome full-scale darken/densify — MUST match CC_*_STRENGTH in adjustments.rs.
+const float CC_LUM_STRENGTH = 0.12;
+const float CC_SAT_STRENGTH = 0.10;
+// Full-scale grain luminance amplitude — MUST match GRAIN_STRENGTH in adjustments.rs.
+const float GRAIN_STRENGTH = 0.15;
 
 // Per-channel sRGB <-> linear, matching the Rust implementation exactly.
 float srgbToLinear(float c) {
@@ -143,6 +155,27 @@ vec3 applyHsl(vec3 rgb) {
   return hsl2rgb(h2, s2, l2);
 }
 
+// Color chrome: darken + densify in proportion to the pixel's own saturation,
+// with an extra blue-weighted term. Mirror of Rust apply_color_chrome() — edit
+// both together.
+vec3 applyColorChrome(vec3 rgb, float strength, float blue) {
+  vec3 hsl = rgb2hsl(rgb);
+  float blueW = smoothstep(180.0, 240.0, hsl.x) * (1.0 - smoothstep(240.0, 300.0, hsl.x));
+  float amount = (strength + blue * blueW) * hsl.y;
+  float l2 = clamp(hsl.z * (1.0 - CC_LUM_STRENGTH * amount), 0.0, 1.0);
+  float s2 = clamp(hsl.y * (1.0 + CC_SAT_STRENGTH * amount), 0.0, 1.0);
+  return hsl2rgb(hsl.x, s2, l2);
+}
+
+// One grain value per cell coordinate, in [0, 1). Dave Hoskins' hash12 — only
+// fract/dot/mul (no sin), so it reproduces in Rust f32. Mirror of Rust
+// hash_cell() — identical constants.
+float hashCell(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
 // Luminance-preserving white balance on linear RGB.
 // Mirror of Rust apply_white_balance() — edit both together.
 vec3 applyWhiteBalance(vec3 lin, float temperature, float tint) {
@@ -187,6 +220,23 @@ void main() {
   // Per-hue HSL (skipped entirely when no band is touched).
   if (uHslActive > 0.5) {
     outColor = applyHsl(outColor);
+  }
+
+  // Color chrome — deepen saturated colors (+ the blue-weighted variant).
+  if (uColorChrome > 0.0 || uColorChromeBlue > 0.0) {
+    outColor = applyColorChrome(outColor, uColorChrome, uColorChromeBlue);
+  }
+
+  // Film grain — spatial, on top of the final color. Mirror of Rust
+  // apply_grain(): quantize image coords to grain cells, hash the cell,
+  // luminance-only noise faded at pure black/white.
+  if (uGrain > 0.0) {
+    float cell = 1.0 + 2.0 * clamp(uGrainSize, 0.0, 1.0);
+    vec2 c = floor(vUv * uTexSize / cell);
+    float n = hashCell(c) * 2.0 - 1.0;
+    float luma = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
+    float mask = smoothstep(0.0, 0.15, luma) * (1.0 - smoothstep(0.85, 1.0, luma));
+    outColor = clamp(outColor + GRAIN_STRENGTH * uGrain * n * mask, 0.0, 1.0);
   }
 
   gl_FragColor = vec4(outColor, src.a);

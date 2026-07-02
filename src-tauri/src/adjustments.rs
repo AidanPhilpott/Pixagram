@@ -34,9 +34,21 @@
 //!    grey/luma), across all three channels at once.
 //! 9. **HSL** — per-hue-band hue/saturation/luminance: convert to HSL, blend the
 //!    adjacent bands' adjustments at the pixel's hue, apply, convert back.
+//! 10. **Color chrome** — deepen highly saturated colors (darken + densify in
+//!     proportion to the pixel's own saturation), with an extra blue-weighted
+//!     term. Emulates Fujifilm's Color Chrome Effect / Color Chrome FX Blue.
 //!
-//! This is the full Phase-2 color pipeline. Order matters and is the contract —
+//! This is the full color pipeline. Order matters and is the contract —
 //! keep it identical here and in the GLSL shader.
+//!
+//! **Grain is spatial and runs OUTSIDE `apply_pixel`** (it needs pixel
+//! coordinates, which per-pixel color math doesn't have). Like rotation it is a
+//! documented lockstep pair: [`apply_grain`] here (the exporter must call it per
+//! pixel *after* `apply_pixel`) and the grain block at the end of the GLSL
+//! shader. Both sides quantize image-space coordinates to grain cells and hash
+//! them with the same function, so the character matches; because grain is
+//! stochastic and the preview is downscaled, preview grain matches the export in
+//! look, not pixel-for-pixel (the one deliberate WYSIWYG relaxation).
 //!
 //! **Geometry (rotation) is NOT part of `apply_pixel`.** The `rotation` field is
 //! quarter-turn geometry applied once per image, *after* all pixel math: the
@@ -131,6 +143,24 @@ pub struct Adjustments {
     /// Tone-curve control points, sorted by `x`, both axes in [0,1]. Default is
     /// the identity line `[(0,0), (1,1)]`. Applied per channel after contrast.
     pub curve: Vec<CurvePoint>,
+    /// Color Chrome Effect strength in [0.0, 1.0]. 0.0 = off. Deepens highly
+    /// saturated colors (darkens + adds density in proportion to the pixel's own
+    /// saturation) for extra tonality where colors would otherwise block up.
+    /// Fuji's Weak ≈ 0.5, Strong ≈ 1.0. UI shows [0, 100].
+    pub color_chrome: f32,
+    /// Color Chrome FX Blue strength in [0.0, 1.0]. 0.0 = off. Same deepening as
+    /// `color_chrome` but weighted to blue hues only (skies, blue subjects).
+    /// Fuji's Weak ≈ 0.5, Strong ≈ 1.0. UI shows [0, 100].
+    pub color_chrome_blue: f32,
+    /// Film-grain amount in [0.0, 1.0]. 0.0 = off. Monochromatic luminance grain,
+    /// strongest in the midtones, faded at pure black/white like real film.
+    /// Fuji's Weak ≈ 0.25, Strong ≈ 0.5. Spatial — applied by [`apply_grain`]
+    /// after the color math, NOT inside `apply_pixel`. UI shows [0, 100].
+    pub grain: f32,
+    /// Grain particle size in [0.0, 1.0]: 0.0 = fine (1px cells), 1.0 = coarse
+    /// (3px cells). Fuji's Small ≈ 0.0, Large ≈ 0.75. Only visible when
+    /// `grain > 0`. UI shows [0, 100].
+    pub grain_size: f32,
     /// Rotation in **clockwise quarter-turns**, `0..=3` (0 = as shot). Geometry,
     /// not color — deliberately absent from `apply_pixel`. Applied once per image
     /// after the pixel math: `export::apply_rotation` on the Rust side, the
@@ -157,6 +187,10 @@ impl Default for Adjustments {
                 CurvePoint { x: 0.0, y: 0.0 },
                 CurvePoint { x: 1.0, y: 1.0 },
             ],
+            color_chrome: 0.0,
+            color_chrome_blue: 0.0,
+            grain: 0.0,
+            grain_size: 0.0,
             rotation: 0,
         }
     }
@@ -175,6 +209,16 @@ const WB_TINT_STRENGTH: f32 = 0.3;
 /// Full-scale lift the tone-region controls can apply to the perceptual value.
 /// Tunable; MUST match `TONE_STRENGTH` in the GLSL shader.
 const TONE_STRENGTH: f32 = 0.2;
+
+/// Color-chrome full-scale effect: how much a fully saturated pixel is darkened
+/// (`CC_LUM`) and densified (`CC_SAT`) at strength 1.0. Tunable; MUST match the
+/// GLSL shader.
+const CC_LUM_STRENGTH: f32 = 0.12;
+const CC_SAT_STRENGTH: f32 = 0.10;
+
+/// Full-scale luminance amplitude of the film grain (strength 1.0, midtone
+/// pixel). Tunable; MUST match `GRAIN_STRENGTH` in the GLSL shader.
+const GRAIN_STRENGTH: f32 = 0.15;
 
 /// Decode one sRGB-encoded channel value (0..=1) to linear light.
 #[inline]
@@ -350,6 +394,70 @@ fn apply_hsl(rgb: [f32; 3], hsl: &[HslBand]) -> [f32; 3] {
     hsl_to_rgb(h2, s2, l2)
 }
 
+/// Apply the color-chrome effect to a perceptual RGB pixel: darken and densify
+/// in proportion to the pixel's own saturation, so vivid colors gain depth and
+/// near-neutrals are untouched. `blue` adds the same deepening weighted to blue
+/// hues (a raised-cosine window over 180°–300°, peaking at 240°). Emulates
+/// Fujifilm's Color Chrome Effect / Color Chrome FX Blue.
+/// **Mirror of `applyColorChrome` in the GLSL shader — edit both together.**
+#[inline]
+fn apply_color_chrome(rgb: [f32; 3], strength: f32, blue: f32) -> [f32; 3] {
+    if strength == 0.0 && blue == 0.0 {
+        return rgb;
+    }
+    let (h, s, l) = rgb_to_hsl(rgb);
+    let blue_w = smoothstep(180.0, 240.0, h) * (1.0 - smoothstep(240.0, 300.0, h));
+    let amount = (strength + blue * blue_w) * s;
+    let l2 = (l * (1.0 - CC_LUM_STRENGTH * amount)).clamp(0.0, 1.0);
+    let s2 = (s * (1.0 + CC_SAT_STRENGTH * amount)).clamp(0.0, 1.0);
+    hsl_to_rgb(h, s2, l2)
+}
+
+/// One value-noise sample for the grain: hash a grain-cell coordinate to
+/// [0, 1). Dave Hoskins' `hash12` — chosen because it uses only fract/dot/mul
+/// (no `sin`), so the f32 math is reproducible between Rust and the GPU.
+/// **Mirror of `hashCell` in the GLSL shader — identical constants.**
+#[inline]
+fn hash_cell(x: f32, y: f32) -> f32 {
+    // GLSL fract() is x - floor(x) (always in [0,1)), not Rust's sign-keeping
+    // f32::fract — inputs here are non-negative but keep the exact form.
+    let fract = |v: f32| v - v.floor();
+    let mut p3 = [fract(x * 0.1031), fract(y * 0.1031), fract(x * 0.1031)];
+    let d = p3[0] * (p3[1] + 33.33) + p3[1] * (p3[2] + 33.33) + p3[2] * (p3[0] + 33.33);
+    p3[0] += d;
+    p3[1] += d;
+    p3[2] += d;
+    fract((p3[0] + p3[1]) * p3[2])
+}
+
+/// Apply film grain to one finished pixel at image coordinates `(x, y)`.
+///
+/// Spatial — the coordinate-needing counterpart to [`apply_pixel`]; the exporter
+/// must call this per pixel AFTER `apply_pixel` (grain sits on top of the final
+/// color, like real film). Monochromatic luminance noise, one random value per
+/// grain cell (`1 + 2·grain_size` px square), scaled by a midtone mask so pure
+/// black/white stay clean. **Mirror of the grain block at the end of the GLSL
+/// shader's `main()` — edit both together.** Preview grain is computed at
+/// preview resolution, so it matches the export in character, not per-pixel.
+#[inline]
+pub fn apply_grain(rgb: [f32; 3], x: u32, y: u32, adj: &Adjustments) -> [f32; 3] {
+    if adj.grain <= 0.0 {
+        return rgb;
+    }
+    let cell = 1.0 + 2.0 * adj.grain_size.clamp(0.0, 1.0);
+    let cx = (x as f32 / cell).floor();
+    let cy = (y as f32 / cell).floor();
+    let n = hash_cell(cx, cy) * 2.0 - 1.0;
+    let luma = luminance(rgb);
+    let mask = smoothstep(0.0, 0.15, luma) * (1.0 - smoothstep(0.85, 1.0, luma));
+    let d = GRAIN_STRENGTH * adj.grain * n * mask;
+    [
+        (rgb[0] + d).clamp(0.0, 1.0),
+        (rgb[1] + d).clamp(0.0, 1.0),
+        (rgb[2] + d).clamp(0.0, 1.0),
+    ]
+}
+
 /// Evaluate the tone curve at `x` (perceptual, [0,1]) with a monotonic cubic
 /// (Fritsch–Carlson) spline through `points`. `points` must be sorted by `x`
 /// with ≥2 entries; the identity line `[(0,0),(1,1)]` returns `x` exactly.
@@ -488,7 +596,9 @@ pub fn apply_pixel(adj: &Adjustments, rgb: [f32; 3]) -> [f32; 3] {
     // Saturation / vibrance — cross-channel, so it runs on the whole triple.
     let out = apply_saturation(out, adj.saturation, adj.vibrance);
     // HSL — per-hue hue/sat/luminance.
-    apply_hsl(out, &adj.hsl)
+    let out = apply_hsl(out, &adj.hsl);
+    // Color chrome — deepen saturated colors (+ the blue-weighted variant).
+    apply_color_chrome(out, adj.color_chrome, adj.color_chrome_blue)
 }
 
 #[cfg(test)]
@@ -658,6 +768,78 @@ mod tests {
         let blue = apply_pixel(&adj, [0.2, 0.2, 0.8]); // hue ~240
         let blue_spread = blue[0].max(blue[1]).max(blue[2]) - blue[0].min(blue[1]).min(blue[2]);
         assert!(blue_spread > 0.5, "blue should be untouched, got spread {blue_spread}");
+    }
+
+    #[test]
+    fn color_chrome_deepens_saturated_colors_only() {
+        let adj = Adjustments { color_chrome: 1.0, ..Default::default() };
+        // A vivid red loses luminance (gains depth)…
+        let vivid_in = [0.9, 0.15, 0.15];
+        let vivid = apply_pixel(&adj, vivid_in);
+        assert!(
+            luminance(vivid) < luminance(vivid_in) - 0.005,
+            "vivid red should darken, {} -> {}",
+            luminance(vivid_in),
+            luminance(vivid)
+        );
+        // …while a grey is untouched (amount scales with the pixel's saturation).
+        let grey = apply_pixel(&adj, [0.5; 3]);
+        assert!((grey[0] - 0.5).abs() < 1e-4, "grey must be untouched, got {}", grey[0]);
+    }
+
+    #[test]
+    fn color_chrome_blue_targets_blue_hues() {
+        let adj = Adjustments { color_chrome_blue: 1.0, ..Default::default() };
+        let blue_in = [0.2, 0.3, 0.9];
+        let red_in = [0.9, 0.2, 0.2];
+        let d_blue = luminance(blue_in) - luminance(apply_pixel(&adj, blue_in));
+        let d_red = luminance(red_in) - luminance(apply_pixel(&adj, red_in));
+        assert!(d_blue > 0.005, "blue pixel should deepen, delta {d_blue}");
+        assert!(d_red.abs() < 1e-4, "red pixel should be untouched, delta {d_red}");
+    }
+
+    #[test]
+    fn grain_zero_is_identity_and_grain_is_monochrome() {
+        let adj = Adjustments::default();
+        let px = [0.3, 0.5, 0.7];
+        assert_eq!(apply_grain(px, 10, 20, &adj), px, "no grain = exact identity");
+
+        let grainy = Adjustments { grain: 1.0, ..Default::default() };
+        let out = apply_grain(px, 10, 20, &grainy);
+        // Monochromatic: every channel moves by the same luminance delta.
+        let d = [out[0] - px[0], out[1] - px[1], out[2] - px[2]];
+        assert!((d[0] - d[1]).abs() < 1e-6 && (d[1] - d[2]).abs() < 1e-6, "grain is luma-only");
+        assert!(d[0].abs() <= GRAIN_STRENGTH + 1e-6, "amplitude bounded by GRAIN_STRENGTH");
+    }
+
+    #[test]
+    fn grain_varies_by_position_fades_at_extremes_and_is_deterministic() {
+        let adj = Adjustments { grain: 1.0, ..Default::default() };
+        let px = [0.5; 3];
+        // Deterministic (same coord, same value) but varies across coords.
+        assert_eq!(apply_grain(px, 3, 7, &adj), apply_grain(px, 3, 7, &adj));
+        let samples: Vec<f32> = (0..32).map(|i| apply_grain(px, i, i * 13 + 1, &adj)[0]).collect();
+        let spread = samples.iter().cloned().fold(f32::MIN, f32::max)
+            - samples.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(spread > 0.01, "grain must vary across positions, spread {spread}");
+        // Pure black and white stay clean (film has no grain there).
+        assert_eq!(apply_grain([0.0; 3], 3, 7, &adj), [0.0; 3]);
+        assert_eq!(apply_grain([1.0; 3], 3, 7, &adj), [1.0; 3]);
+    }
+
+    #[test]
+    fn grain_size_grows_the_cells() {
+        // With coarse grain, adjacent pixels inside one 3px cell share a value.
+        let coarse = Adjustments { grain: 1.0, grain_size: 1.0, ..Default::default() };
+        let px = [0.5; 3];
+        let a = apply_grain(px, 0, 0, &coarse);
+        let b = apply_grain(px, 2, 2, &coarse);
+        assert_eq!(a, b, "pixels in the same 3px cell share one grain value");
+        // With fine grain those same coordinates are different cells.
+        let fine = Adjustments { grain: 1.0, grain_size: 0.0, ..Default::default() };
+        let c = apply_grain(px, 0, 0, &fine);
+        let d = apply_grain(px, 2, 2, &fine);
+        assert_ne!(c, d, "fine grain resolves per pixel");
     }
 
     #[test]

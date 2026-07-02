@@ -79,6 +79,32 @@ hsl: Array<HslBand>,
  */
 curve: Array<CurvePoint>, 
 /**
+ * Color Chrome Effect strength in [0.0, 1.0]. 0.0 = off. Deepens highly
+ * saturated colors (darkens + adds density in proportion to the pixel's own
+ * saturation) for extra tonality where colors would otherwise block up.
+ * Fuji's Weak ≈ 0.5, Strong ≈ 1.0. UI shows [0, 100].
+ */
+colorChrome: number, 
+/**
+ * Color Chrome FX Blue strength in [0.0, 1.0]. 0.0 = off. Same deepening as
+ * `color_chrome` but weighted to blue hues only (skies, blue subjects).
+ * Fuji's Weak ≈ 0.5, Strong ≈ 1.0. UI shows [0, 100].
+ */
+colorChromeBlue: number, 
+/**
+ * Film-grain amount in [0.0, 1.0]. 0.0 = off. Monochromatic luminance grain,
+ * strongest in the midtones, faded at pure black/white like real film.
+ * Fuji's Weak ≈ 0.25, Strong ≈ 0.5. Spatial — applied by [`apply_grain`]
+ * after the color math, NOT inside `apply_pixel`. UI shows [0, 100].
+ */
+grain: number, 
+/**
+ * Grain particle size in [0.0, 1.0]: 0.0 = fine (1px cells), 1.0 = coarse
+ * (3px cells). Fuji's Small ≈ 0.0, Large ≈ 0.75. Only visible when
+ * `grain > 0`. UI shows [0, 100].
+ */
+grainSize: number, 
+/**
  * Rotation in **clockwise quarter-turns**, `0..=3` (0 = as shot). Geometry,
  * not color — deliberately absent from `apply_pixel`. Applied once per image
  * after the pixel math: `export::apply_rotation` on the Rust side, the

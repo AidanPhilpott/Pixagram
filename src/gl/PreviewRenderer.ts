@@ -29,6 +29,11 @@ export class PreviewRenderer {
   private uHslLum: WebGLUniformLocation | null;
   private uHslActive: WebGLUniformLocation | null;
   private uCurveActive: WebGLUniformLocation | null;
+  private uColorChrome: WebGLUniformLocation | null;
+  private uColorChromeBlue: WebGLUniformLocation | null;
+  private uGrain: WebGLUniformLocation | null;
+  private uGrainSize: WebGLUniformLocation | null;
+  private uTexSize: WebGLUniformLocation | null;
   private curveTexture: WebGLTexture | null = null;
   private quadBuffer: WebGLBuffer | null = null;
   /** True when float textures + linear filtering are available (16-bit preview). */
@@ -92,6 +97,11 @@ export class PreviewRenderer {
     this.uHslLum = gl.getUniformLocation(this.program, "uHslLum");
     this.uHslActive = gl.getUniformLocation(this.program, "uHslActive");
     this.uCurveActive = gl.getUniformLocation(this.program, "uCurveActive");
+    this.uColorChrome = gl.getUniformLocation(this.program, "uColorChrome");
+    this.uColorChromeBlue = gl.getUniformLocation(this.program, "uColorChromeBlue");
+    this.uGrain = gl.getUniformLocation(this.program, "uGrain");
+    this.uGrainSize = gl.getUniformLocation(this.program, "uGrainSize");
+    this.uTexSize = gl.getUniformLocation(this.program, "uTexSize");
 
     // Texture units: 0 = image, 1 = tone-curve LUT.
     gl.uniform1i(gl.getUniformLocation(this.program, "uImage"), 0);
@@ -229,6 +239,13 @@ export class PreviewRenderer {
     gl.uniform1f(this.uBlacks, this.adjustments.blacks);
     gl.uniform1f(this.uSaturation, this.adjustments.saturation);
     gl.uniform1f(this.uVibrance, this.adjustments.vibrance);
+    gl.uniform1f(this.uColorChrome, this.adjustments.colorChrome);
+    gl.uniform1f(this.uColorChromeBlue, this.adjustments.colorChromeBlue);
+    // Grain coordinates are the *preview* texture's pixel grid — same character
+    // as the export's full-res grain, not the same pixels (see the shader note).
+    gl.uniform1f(this.uGrain, this.adjustments.grain);
+    gl.uniform1f(this.uGrainSize, this.adjustments.grainSize);
+    gl.uniform2f(this.uTexSize, this.imgWidth, this.imgHeight);
 
     let hslActive = 0;
     const hsl = this.adjustments.hsl;

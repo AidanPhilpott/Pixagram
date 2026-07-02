@@ -31,6 +31,7 @@ import {
 import {
   COLOR_RANGE,
   CONTRAST_RANGE,
+  EFFECT_RANGE,
   EXPOSURE_RANGE,
   TONE_RANGE,
   WB_RANGE,
@@ -42,6 +43,9 @@ import {
 
 /** Compact readout shared by all unit-less [-1,1] sliders (shown as [-100,+100]). */
 const asPercent = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`;
+
+/** Readout for one-sided [0,1] effect sliders (shown as [0,100], no sign). */
+const asAmount = (v: number) => `${Math.round(v * 100)}`;
 
 /** Per-photo undo/redo snapshots (whole `Adjustments` values, newest last). */
 type History = { past: Adjustments[]; future: Adjustments[] };
@@ -82,7 +86,7 @@ type ScalarField = {
 const SLIDERS: ReadonlyArray<{
   field: ScalarField;
   label: string;
-  group: "light" | "color";
+  group: "light" | "color" | "effects";
   range: { min: number; max: number; step: number };
   format: (v: number) => string;
 }> = [
@@ -96,6 +100,11 @@ const SLIDERS: ReadonlyArray<{
   { field: "tint", label: "Tint", group: "color", range: WB_RANGE, format: asPercent },
   { field: "vibrance", label: "Vibrance", group: "color", range: COLOR_RANGE, format: asPercent },
   { field: "saturation", label: "Saturation", group: "color", range: COLOR_RANGE, format: asPercent },
+  // Fuji-style effect controls (all [0, 1], shown as [0, 100]).
+  { field: "grain", label: "Grain", group: "effects", range: EFFECT_RANGE, format: asAmount },
+  { field: "grainSize", label: "Grain Size", group: "effects", range: EFFECT_RANGE, format: asAmount },
+  { field: "colorChrome", label: "Color Chrome", group: "effects", range: EFFECT_RANGE, format: asAmount },
+  { field: "colorChromeBlue", label: "Color Chrome Blue", group: "effects", range: EFFECT_RANGE, format: asAmount },
 ];
 
 /** Deep-copy a stack so an applied preset never aliases its arrays into a photo. */
@@ -568,6 +577,9 @@ export function App() {
               disabled={!selected || showOriginal}
               onChange={updateCurve}
             />
+          </CollapsibleSection>
+          <CollapsibleSection id="effects" title="Effects">
+            {SLIDERS.filter((s) => s.group === "effects").map(sliderRow)}
           </CollapsibleSection>
           <CollapsibleSection id="hsl" title="HSL">
             <HslPanel

@@ -7,6 +7,59 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-07-01 (session 5, consolidation) — Phase 3 + editing UX + viewport + multi-format RAW
+
+Four parallel worktree agents were launched (presets / editing-UX / viewport /
+RAW formats); all four hit the account session limit mid-task. One (editing-UX)
+had committed complete work; the parent session ported the other three WIP
+diffs onto master, finished the unbuilt pieces, and verified everything.
+Landed as four commits on master:
+
+- **Editing UX** (agent-complete): per-photo **undo/redo** (Ctrl+Z / Ctrl+Y /
+  Ctrl+Shift+Z) with drag coalescing — every stack write funnels through one
+  `applyEdit(key, fn)` choke point that pushes a history snapshot unless the
+  same key repeats within 400ms, so a slider drag is ONE undo step. **Quick
+  before/after**: hold `\` (momentary) or click the "Original" toggle — the
+  preview is handed neutral adjustments, stored stacks untouched. **Collapsible
+  inspector sections** (Light / Color / Tone Curve / HSL / Presets) with
+  localStorage-persisted open state; only Light starts open.
+- **Phase 3 presets** (agent-built, parent-integrated): see the entry below for
+  the store/UI details. Integration change: `applyPreset` pushes an undo
+  snapshot per affected photo (batch apply is one Ctrl+Z per photo), and the
+  panel sits in a collapsible "Presets" section.
+- **Viewport** (agent ~70%, parent finished): **rotation** as a shared-
+  definition field (`rotation: u8` quarter-turns CW, `#[serde(default)]`) —
+  geometry, not color: export uses `image` rotate90/180/270
+  (`export::apply_rotation`, 4 orientation tests), preview rotates the quad UVs
+  + swaps canvas aspect in `PreviewRenderer`. Stage toolbar buttons + `[`/`]`
+  keys. **Zoom/pan** (parent-built): cursor-anchored wheel zoom, drag pan,
+  −/+/Fit/% toolbar, double-click Fit↔100%, as a CSS transform on the canvas —
+  shader untouched; resets on photo/rotation change. **Edit-stack persistence**
+  (`store.rs` + `save_stacks`/`load_stacks`): the whole stacks map saved as
+  `<app-data>/edit-stacks.json`, loaded at startup, saved debounced 1s — all
+  edits incl. rotation survive restarts. Saving is disabled until a load
+  succeeds so a failed load can't blank the store.
+- **Multi-format RAW** (agent ~60%, parent finished): develop core split into
+  CFA-generic `develop_mosaic(DevelopParams)` — Bayer 2×2 (all four phases) and
+  X-Trans 6×6 through the same metadata-driven stages; 6 synthetic-mosaic unit
+  tests. Thumbnails: sidecar JPG → **embedded preview JPEG** → develop.
+  Picker/labels now RAF/NEF/CR2/CR3/ARW/DNG/ORF/RW2/PEF.
+
+**Real-camera validation (user-supplied Sony A7II ARWs):** caught a latent
+demosaic overflow — `out_h = round(rh/scale)` rounds up and the last row's
+source window ran past the active area; Fuji never crashed only because its
+masked borders left slack. Fixed with explicit clamps + regression test (see
+INSIGHTS). After the fix all three ARWs develop neutral (near-white R/G, B/G
+within ~2%) and the 1616×1080 embedded JPEG extracts for thumbs (ARW's rawler
+decoder only implements `full_image` — the sidecar→embedded→develop chain
+covers it).
+
+**Verified:** `cargo test` 42/42; `npm run build` clean; develop_check on 3
+ARWs. **Not yet app-eyeballed — human run-through needed before tagging
+`v0.3.0`.**
+
+---
+
 ## 2026-07-01 (session 5, worktree agent) — Phase 3: presets (save/apply/manage)
 
 Phase 3 core built as decided (model **A**: a preset = a named, editable

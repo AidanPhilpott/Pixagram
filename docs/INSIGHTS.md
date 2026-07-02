@@ -19,6 +19,23 @@ in [../CLAUDE.md](../CLAUDE.md).)
 
 ## Raw decode (rawler 0.7.2)
 
+- **Demosaic footprint must be clamped to the visible region.** The output grid
+  is `round(r/scale)` per axis, which can round UP — then the last row/column's
+  source window `(o+1)·scale` lands one sensor row past the active area. Fuji
+  never crashed (masked borders below the frame absorbed the read); the Sony
+  A7II's active area runs to the sensor edge → index-out-of-bounds at exactly
+  `len`. `develop_mosaic` clamps `sy1/sx1` (and `sy0/sx0`) to `rh/rw`;
+  regression test `rounded_up_output_grid_stays_in_bounds`. Any future demosaic
+  rewrite must keep this property.
+- **Embedded-preview extraction is per-decoder in rawler 0.7.2.** The `Decoder`
+  trait defaults `thumbnail_image`/`preview_image`/`full_image` to `None`; ARW
+  implements ONLY `full_image` (which returns the embedded JPEG, 1616×1080 on
+  the A7II). So always try all three, smallest first (`raf::embedded_jpeg`).
+  Don't assume `thumbnail_image` works for a format until tested.
+- **`CFA::color_at(row, col)` is absolute-sensor-indexed**, so Bayer phase
+  (RGGB vs BGGR vs GRBG vs GBRG) is carried by the pattern itself — sampling
+  sites through `color_at` with absolute coordinates handles every phase with
+  no special-casing (test: `bayer_all_four_phases_agree`).
 - Pipeline: `rawler::decode_file(path)` → `RawImage`, then
   `rawler::imgop::develop::RawDevelop::default().develop_intermediate(&raw)` →
   `Intermediate`, then `.to_dynamic_image()` → `image::DynamicImage` (sRGB,

@@ -5,23 +5,51 @@
 > dated entry to [PROGRESS.md](PROGRESS.md) for the running history, and add any
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
-**Last updated:** 2026-06-29 (session 4)
-**Current phase:** Phase 2 (Full adjustment pipeline) — **COMPLETE, tagged
-`v0.2.0`.** All six core color ops committed & app-verified: contrast (`a9a3beb`),
-white balance (`261c468`), tone regions (`68bfeb8`), vibrance/saturation (`108d5e7`),
-HSL (`1a76c8d`), tone curve (`e95ef14`). Both hardening items done: ts-rs type
-codegen (`b219ec0`) and the 16-bit float preview (`41d5a48`, app-verified — banding
-gone). 18 adjustment-math tests + 3 ts-rs binding tests pass. **Next session: begin
-Phase 3 (Presets / color profiles).**
+**Last updated:** 2026-07-01 (session 5 — multi-agent batch + consolidation)
+**Current phase:** Phase 3 (Presets) — **BUILT, plus a large feature batch;
+needs a human app run-through before tagging `v0.3.0`.** Landed this session as
+4 commits (`51dae30`…`c015c8e`):
+- **Presets (Phase 3, model A):** JSON store under `<app-data>/presets/` with
+  list/save/delete/rename commands, 4 built-ins, `PresetPanel` in the
+  inspector, Ctrl/Shift grid multi-select + batch apply.
+- **Editing UX:** per-photo undo/redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z; every
+  stack write funnels through the drag-coalescing `applyEdit` in App.tsx),
+  hold-`\` / "Original" toggle before/after view, collapsible inspector
+  sections (only "Light" open by default; state in localStorage).
+- **Viewport:** cursor-anchored wheel zoom + drag pan + Fit/100% toggle (CSS
+  transform on the canvas), and 90° rotation as a shared `Adjustments` field —
+  GPU quad-UV rotation kept in lockstep with Rust `export::apply_rotation`.
+  Stage toolbar + `[` / `]` keys.
+- **Persistence:** per-image edit stacks in `<app-data>/edit-stacks.json`
+  (`store.rs`; loaded at startup, saved debounced) — every edit, rotation
+  included, survives restarts.
+- **Multi-format RAW:** the owned develop is CFA-generic (Bayer 2×2 all phases
+  + X-Trans 6×6); thumbnail chain sidecar JPG → embedded preview JPEG →
+  develop; picker accepts RAF/NEF/CR2/CR3/ARW/DNG/ORF/RW2/PEF. Validated on
+  real Sony A7II ARWs, which exposed + fixed a latent demosaic edge overflow
+  (see INSIGHTS "Raw decode").
+
+42 Rust tests + `npm run build` pass. ts-rs types regenerated (now include
+`rotation` and `Preset`).
 **Branch:** `master` (local-only, no remote) · **Last tag:** `v0.2.0`
 
-> **Color-profile / "Fuji recipe" feature → decided: belongs in Phase 3 (Presets).**
-> A profile = a saved `Adjustments` value (JSON). Recommended model is **(A)** a
-> named, editable bundle of the same sliders (honors the single-shared-definition
-> constraint + the "don't reproduce Fuji recipes" non-goal), **not (B)** a base
-> LUT/film-sim layer beneath the sliders. Settle A-vs-B when Phase 3 starts. Phase 2
-> carry-forward: keep every new field `#[serde(default)]` so profiles save/load for
-> free. See "Open risks" + PROGRESS 2026-06-29 (session 4).
+> **Color-profile / "Fuji recipe" feature → SHIPPED as Phase 3 presets, model
+> (A):** a preset is a named, editable `Adjustments` JSON bundle; a base
+> LUT/film-sim layer stays a non-goal. Carry-forward unchanged: every new
+> `Adjustments` field keeps `#[serde(default)]` so preset AND edit-stack JSON
+> keep loading as the struct grows.
+
+## ⚠️ START HERE NEXT SESSION
+
+1. **Human verification pass** (can't be done from the sandbox): run the app,
+   eyeball undo/redo, `\` original view, collapsed inspector, zoom/pan,
+   rotation (incl. persistence across a restart), presets (save/apply/batch,
+   built-ins), and a Sony ARW import (thumbs from the embedded JPEG, neutral
+   develop, no sidecar needed). Then tag `v0.3.0`.
+2. **Remaining phase work, in order:** Phase 4 leftovers (crop + free
+   straighten — 90° rotate is done), then Phase 5 export (real JPEG + borders +
+   sRGB tag + EXIF policy decision + batch/naming), Phase 6 polish, Phase 7
+   macOS.
 
 ---
 
@@ -41,29 +69,12 @@ GPU re-render). The frontend type-checks and bundles; the Rust core compiles
 - [x] 6. One exposure slider via the shared adjustment definition, live re-render
 - [x] 7. Stub/log an export step end-to-end (`export_stub`)
 
-## ⚠️ START HERE NEXT SESSION — begin Phase 3 (Presets / color profiles)
+### Phase 3 context (superseded — presets shipped in session 5, see top)
 
-Phase 2 is DONE and tagged `v0.2.0`: the full color pipeline (exposure → WB → tone
-regions → contrast → tone curve → vibrance/sat → HSL) runs through the single shared
-definition, preview == export, on a 16-bit preview, with the TS types codegen'd from
-Rust. **Next: Phase 3 — save/apply/manage presets, which is the color-profile /
-"Fuji recipe" feature the user asked for on day one.**
+The A-vs-B decision resolved as (A); the store, commands, panel UI, and grid
+multi-select all exist now. Kept below for the design rationale only.
 
-First moves for Phase 3:
-1. **Settle the A-vs-B model with the user** (see the callout above + Open Risks):
-   recommend (A) — a profile is a named, editable bundle of the existing
-   `Adjustments` JSON, with a few built-in defaults + "save current as profile" +
-   batch-apply across a selection. (B) a base LUT/film-sim layer is a non-goal.
-2. **Persistence:** presets are plain JSON on disk (brief: "portable, diffable,
-   syncable"). Decide the store location + a Tauri command surface (list/save/delete/
-   apply). The `Adjustments` type already serializes cleanly (serde + ts-rs).
-3. **UI:** a preset library panel; apply-to-one and apply-to-many (multi-select in the
-   grid — note the grid is currently single-select, so selection model needs a look).
-
-Everything a profile bundles already exists; Phase 3 is storage + apply + UI, not new
-color math.
-
-**WB design (decided this session):** temp/tint is a **relative, luminance-preserving
+**WB design (decided session 4):** temp/tint is a **relative, luminance-preserving
 chroma shift on the developed image** (chosen over a true raw Kelvin WB, which would
 require re-developing per slider tick and break the live GPU preview). This is how
 Lightroom treats non-raw files. The develop's base-color accuracy (single D65 matrix,
@@ -262,12 +273,3 @@ sliders. Concretely, the first moves:
   Easy add in Phase 2 via Tauri's file-drop event.
 - **Preview is 8-bit** — see INSIGHTS; move to 16-bit/float before stacking tone
   ops in Phase 2.
-
----
-
-> **Worktree-session note (2026-07-01, Phase 3 presets):** the preset store
-> (`src-tauri/src/presets.rs` + 4 Tauri commands), 4 built-ins, the
-> `PresetPanel` UI, and Ctrl/Shift grid multi-select with batch apply landed on
-> this branch. See PROGRESS 2026-07-01 for details. Verified by `cargo test`
-> and `npm run build` only — **needs a human app run-through before tagging
-> `v0.3.0`**. The consolidating session should rewrite the snapshot above.

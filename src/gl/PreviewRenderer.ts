@@ -7,8 +7,25 @@
  */
 import { VERTEX_SHADER } from "./preview.vert";
 import { FRAGMENT_SHADER } from "./preview.frag";
-import { defaultAdjustments, type Adjustments } from "../adjustments/definition";
+import {
+  defaultAdjustments,
+  fullFrameCrop,
+  type Adjustments,
+} from "../adjustments/definition";
 import { bakeCurveLut, isIdentityCurve } from "../adjustments/curve";
+
+/**
+ * Auto-zoom factor for a free straighten: the largest same-aspect rectangle
+ * that fits inside the frame rotated by `degrees` — so straightening never
+ * shows blank corners. **Lockstep with Rust `straighten_cover_scale` in
+ * `src-tauri/src/adjustments.rs` — the formula must match exactly.**
+ */
+function coverScale(w: number, h: number, degrees: number): number {
+  const a = (Math.abs(degrees) * Math.PI) / 180;
+  const sin = Math.sin(a);
+  const cos = Math.cos(a);
+  return Math.min(w / (w * cos + h * sin), h / (w * sin + h * cos), 1);
+}
 
 export class PreviewRenderer {
   private gl: WebGLRenderingContext;
@@ -46,8 +63,8 @@ export class PreviewRenderer {
   // Unrotated (as-decoded) image dimensions; the canvas swaps them for 90°/270°.
   private imgWidth = 0;
   private imgHeight = 0;
-  /** Rotation the canvas/quad currently reflect (clockwise quarter-turns). */
-  private appliedRotation = 0;
+  /** Geometry the canvas/quad currently reflect (rotation + straighten + crop). */
+  private appliedGeom = { rotation: 0, straighten: 0, crop: fullFrameCrop() };
   private adjustments: Adjustments = defaultAdjustments();
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -68,10 +85,10 @@ export class PreviewRenderer {
     gl.useProgram(this.program);
 
     // Full-canvas quad: two triangles. Interleaved [x, y, u, v]. The UVs are
-    // rewritten by writeQuad whenever the stack's rotation changes.
+    // rewritten by writeQuad whenever the stack's geometry changes.
     this.quadBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
-    this.writeQuad(0);
+    this.writeQuad();
 
     const stride = 4 * Float32Array.BYTES_PER_ELEMENT;
     const aPosition = gl.getAttribLocation(this.program, "aPosition");
@@ -170,46 +187,86 @@ export class PreviewRenderer {
   /** Push the whole adjustment stack into the shader uniforms and redraw. */
   setAdjustments(adj: Adjustments): void {
     this.adjustments = adj;
-    // Rotation is geometry (quad UVs + canvas aspect), not a shader uniform.
-    // Mirror of Rust `export::apply_rotation` — both rotate clockwise.
+    // Geometry (rotation / straighten / crop) lives in the quad UVs + canvas
+    // aspect, not shader uniforms. Mirror of the Rust export chain
+    // `apply_rotation` → `apply_straighten` → `apply_crop`.
+    const g = this.appliedGeom;
     const rotation = ((adj.rotation % 4) + 4) % 4;
-    if (rotation !== this.appliedRotation) {
-      this.appliedRotation = rotation;
+    const c = adj.crop;
+    if (
+      rotation !== g.rotation ||
+      adj.straighten !== g.straighten ||
+      c.x !== g.crop.x ||
+      c.y !== g.crop.y ||
+      c.width !== g.crop.width ||
+      c.height !== g.crop.height
+    ) {
+      this.appliedGeom = { rotation, straighten: adj.straighten, crop: { ...c } };
       this.applyGeometry();
     }
     this.render();
   }
 
-  /** Size the canvas for the applied rotation and rotate the quad's UVs. */
+  /** Size the canvas for the applied geometry and rewrite the quad's UVs. */
   private applyGeometry(): void {
     const gl = this.gl;
-    const swap = this.appliedRotation % 2 === 1;
-    const w = swap ? this.imgHeight : this.imgWidth;
-    const h = swap ? this.imgWidth : this.imgHeight;
-    if (w > 0 && h > 0) {
+    const { rotation, crop } = this.appliedGeom;
+    const swap = rotation % 2 === 1;
+    // Straightened-frame dimensions (straighten preserves them), then crop.
+    const fw = swap ? this.imgHeight : this.imgWidth;
+    const fh = swap ? this.imgWidth : this.imgHeight;
+    const w = Math.max(1, Math.round(fw * Math.min(1, Math.max(0, crop.width))));
+    const h = Math.max(1, Math.round(fh * Math.min(1, Math.max(0, crop.height))));
+    if (fw > 0 && fh > 0) {
       this.canvas.width = w;
       this.canvas.height = h;
       gl.viewport(0, 0, w, h);
     }
-    this.writeQuad(this.appliedRotation);
+    this.writeQuad();
   }
 
   /**
-   * Upload the full-canvas quad with its UVs rotated by `rot` clockwise
-   * quarter-turns. Each turn maps (u, v) → (1 − v, u), which shows the texture
-   * rotated clockwise on screen — matching Rust `apply_rotation` (rotate90 is
-   * clockwise in the `image` crate). Keep the two in lockstep.
+   * Upload the full-canvas quad with source UVs realizing the full geometry
+   * chain — the exact mirror of Rust `apply_rotation` → `apply_straighten` →
+   * `apply_crop` (all three are affine, so interpolating the four corners is
+   * exact). Per output corner: place it in the crop rect (normalized,
+   * straightened frame, y down) → straighten sampling (rotate about center by
+   * −angle, zoom by the cover scale — same matrix as `apply_straighten`) →
+   * quarter-turn UV map ((u,v) → (1−v, u) per clockwise turn, `rotate90` is
+   * clockwise in the `image` crate). Keep all three in lockstep.
    */
-  private writeQuad(rot: number): void {
+  private writeQuad(): void {
     const gl = this.gl;
-    const uv = (u: number, v: number): [number, number] => {
-      for (let i = 0; i < rot; i++) [u, v] = [1 - v, u];
+    const { rotation, straighten, crop } = this.appliedGeom;
+    const swap = rotation % 2 === 1;
+    const fw = (swap ? this.imgHeight : this.imgWidth) || 1;
+    const fh = (swap ? this.imgWidth : this.imgHeight) || 1;
+    const k = coverScale(fw, fh, straighten);
+    const a = (straighten * Math.PI) / 180;
+    const sin = Math.sin(a);
+    const cos = Math.cos(a);
+
+    // cx/cy in {0,1}, y DOWN (0 = top edge of the output frame).
+    const sourceUv = (cx: number, cy: number): [number, number] => {
+      // 1. Corner inside the crop rect, normalized straightened frame (y down).
+      const s = crop.x + cx * crop.width;
+      const t = crop.y + cy * crop.height;
+      // 2. Straighten: source = center + R_cw(−a)·(offset·k), in pixel units.
+      const dx = (s - 0.5) * fw;
+      const dy = (t - 0.5) * fh;
+      const u1 = 0.5 + ((dx * cos + dy * sin) * k) / fw;
+      const t1 = 0.5 + ((-dx * sin + dy * cos) * k) / fh;
+      // 3. To texture coords (v up), then the quarter-turn map.
+      let u = u1;
+      let v = 1 - t1;
+      for (let i = 0; i < rotation; i++) [u, v] = [1 - v, u];
       return [u, v];
     };
-    const bl = uv(0, 0);
-    const br = uv(1, 0);
-    const tl = uv(0, 1);
-    const tr = uv(1, 1);
+
+    const bl = sourceUv(0, 1); // clip-space bottom-left = output's bottom row
+    const br = sourceUv(1, 1);
+    const tl = sourceUv(0, 0);
+    const tr = sourceUv(1, 0);
     // Interleaved [x, y, u, v], two triangles.
     const quad = new Float32Array([
       -1, -1, bl[0], bl[1],

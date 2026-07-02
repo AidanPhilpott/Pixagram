@@ -38,8 +38,10 @@ import {
   TONE_RANGE,
   WB_RANGE,
   defaultAdjustments,
+  fullFrameCrop,
   isNeutralAdjustments,
   type Adjustments,
+  type CropRect,
   type CurvePoint,
   type HslBand,
 } from "./adjustments/definition";
@@ -116,11 +118,25 @@ const SLIDERS: ReadonlyArray<{
  *  stale dev process serializes without them) would otherwise leave the new
  *  fields `undefined` and feed NaN to the shader uniforms. */
 function cloneAdjustments(a: Adjustments): Adjustments {
+  const base = defaultAdjustments();
   return {
-    ...defaultAdjustments(),
+    ...base,
     ...a,
     hsl: a.hsl.map((b) => ({ ...b })),
     curve: a.curve.map((p) => ({ ...p })),
+    crop: { ...(a.crop ?? base.crop) },
+  };
+}
+
+/** A stack with `source`'s look but `target`'s per-shot geometry (rotation,
+ *  straighten, crop). Presets and copy/paste transfer a LOOK — orientation and
+ *  framing belong to the individual photo (Lightroom convention). */
+function withGeometryOf(target: Adjustments, source: Adjustments): Adjustments {
+  return {
+    ...cloneAdjustments(source),
+    rotation: target.rotation,
+    straighten: target.straighten,
+    crop: { ...target.crop },
   };
 }
 
@@ -388,6 +404,29 @@ export function App() {
     [applyEdit]
   );
 
+  // Free straighten + crop (Phase 4) — geometry edits on the selected photo,
+  // routed through applyEdit so drags coalesce into single undo steps.
+  const updateStraighten = useCallback(
+    (degrees: number) => {
+      applyEdit("straighten", (cur) => ({ ...cur, straighten: degrees }));
+    },
+    [applyEdit]
+  );
+  const updateCrop = useCallback(
+    (crop: CropRect) => {
+      applyEdit("crop", (cur) => ({ ...cur, crop: { ...crop } }));
+    },
+    [applyEdit]
+  );
+  // One undoable step clearing both (the crop toolbar's Reset).
+  const resetGeometry = useCallback(() => {
+    applyEdit("resetGeometry", (cur) => ({
+      ...cur,
+      straighten: 0,
+      crop: fullFrameCrop(),
+    }));
+  }, [applyEdit]);
+
   // Keyboard: [ / ] rotate the selected photo (skipped while typing in a field).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -475,10 +514,11 @@ export function App() {
     []
   );
 
-  // Replace the stack of every selected photo with the preset's adjustments.
+  // Replace the LOOK of every selected photo with the preset's adjustments;
+  // each photo keeps its own geometry (rotation / straighten / crop).
   const applyPreset = useCallback(
     (preset: Preset) => {
-      const n = applyToPhotos(selectedIds, () => cloneAdjustments(preset.adjustments));
+      const n = applyToPhotos(selectedIds, (cur) => withGeometryOf(cur, preset.adjustments));
       if (n > 0) setStatus(`Applied "${preset.name}" to ${n} photo${n === 1 ? "" : "s"}`);
     },
     [selectedIds, applyToPhotos]
@@ -511,10 +551,7 @@ export function App() {
   const pasteAdjustments = useCallback(
     (ids: Iterable<string>) => {
       if (!copiedAdjustments) return;
-      const n = applyToPhotos(ids, (cur) => ({
-        ...cloneAdjustments(copiedAdjustments),
-        rotation: cur.rotation,
-      }));
+      const n = applyToPhotos(ids, (cur) => withGeometryOf(cur, copiedAdjustments));
       if (n > 0) setStatus(`Pasted adjustments to ${n} photo${n === 1 ? "" : "s"}`);
     },
     [copiedAdjustments, applyToPhotos]
@@ -691,7 +728,11 @@ export function App() {
             preview={preview}
             adjustments={showOriginal ? ORIGINAL_ADJUSTMENTS : adjustments}
             loading={previewLoading}
+            editable={!!selected && !showOriginal}
             onRotate={rotate}
+            onStraightenChange={updateStraighten}
+            onCropChange={updateCrop}
+            onResetGeometry={resetGeometry}
           />
         </section>
 

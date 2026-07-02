@@ -11,10 +11,11 @@
  * `apply_pixel` and the GLSL shader (`src/gl/preview.frag.ts`).
  */
 import type { Adjustments } from "./generated/Adjustments";
+import type { CropRect } from "./generated/CropRect";
 import type { CurvePoint } from "./generated/CurvePoint";
 import type { HslBand } from "./generated/HslBand";
 
-export type { Adjustments, CurvePoint, HslBand };
+export type { Adjustments, CropRect, CurvePoint, HslBand };
 
 /**
  * The 8 HSL color bands, in order. `hue` is the band centre in degrees, used
@@ -41,6 +42,16 @@ export function identityCurve(): CurvePoint[] {
   ];
 }
 
+/** The no-crop rect — the whole straightened frame. */
+export function fullFrameCrop(): CropRect {
+  return { x: 0, y: 0, width: 1, height: 1 };
+}
+
+/** True when a crop rect covers the whole frame (mirror of Rust `CropRect::is_full`). */
+export function isFullFrameCrop(c: CropRect): boolean {
+  return c.x <= 0 && c.y <= 0 && c.width >= 1 && c.height >= 1;
+}
+
 /** The neutral stack — equivalent to Rust's `Adjustments::default()`. */
 export function defaultAdjustments(): Adjustments {
   return {
@@ -61,6 +72,8 @@ export function defaultAdjustments(): Adjustments {
     grain: 0,
     grainSize: 0,
     rotation: 0,
+    straighten: 0,
+    crop: fullFrameCrop(),
   };
 }
 
@@ -87,6 +100,8 @@ export function isNeutralAdjustments(a: Adjustments): boolean {
     a.grain === 0 &&
     a.grainSize === 0 &&
     a.rotation === 0 &&
+    a.straighten === 0 &&
+    isFullFrameCrop(a.crop) &&
     a.hsl.every((b) => b.hue === 0 && b.sat === 0 && b.lum === 0) &&
     a.curve.every((p) => p.x === p.y)
   );
@@ -112,3 +127,9 @@ export const HSL_RANGE = { min: -1, max: 1, step: 0.01 } as const;
 
 /** UI bounds for the effect sliders (grain, color chrome — stored in [0, 1]). */
 export const EFFECT_RANGE = { min: 0, max: 1, step: 0.01 } as const;
+
+/** UI bounds for the free-straighten slider (degrees clockwise). */
+export const STRAIGHTEN_RANGE = { min: -45, max: 45, step: 0.1 } as const;
+
+/** Smallest crop edge the UI allows (normalized) — keeps handles grabbable. */
+export const MIN_CROP_SIZE = 0.05;

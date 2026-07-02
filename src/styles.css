@@ -372,6 +372,71 @@ body {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
+.stage__tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.stage__label {
+  font-size: 11px;
+  padding: 0 8px;
+}
+.stage__straighten {
+  width: 140px;
+  accent-color: var(--accent);
+}
+
+/* ── Crop mode overlay ───────────────────────────────── */
+.crop-overlay {
+  position: absolute;
+  overflow: hidden; /* clips the dimming shadow to the photo */
+  border-radius: var(--radius);
+  touch-action: none;
+}
+.crop-overlay__rect {
+  position: absolute;
+  cursor: move;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  /* Dim everything outside the crop. */
+  box-shadow: 0 0 0 100000px rgba(0, 0, 0, 0.55);
+}
+.crop-overlay__third {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+}
+.crop-overlay__third--v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+.crop-overlay__third--h {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+.crop-overlay__handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  /* Visible knob smaller than the hit area. */
+  background: transparent;
+}
+.crop-overlay__handle::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: #fff;
+  border-radius: 2px;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+}
+.crop-overlay__handle--nw { left: -7px;      top: -7px;       cursor: nwse-resize; }
+.crop-overlay__handle--n  { left: calc(50% - 7px); top: -7px;  cursor: ns-resize; }
+.crop-overlay__handle--ne { right: -7px;     top: -7px;       cursor: nesw-resize; }
+.crop-overlay__handle--e  { right: -7px;     top: calc(50% - 7px); cursor: ew-resize; }
+.crop-overlay__handle--se { right: -7px;     bottom: -7px;    cursor: nwse-resize; }
+.crop-overlay__handle--s  { left: calc(50% - 7px); bottom: -7px; cursor: ns-resize; }
+.crop-overlay__handle--sw { left: -7px;      bottom: -7px;    cursor: nesw-resize; }
+.crop-overlay__handle--w  { left: -7px;      top: calc(50% - 7px); cursor: ew-resize; }
 
 .preview__loading,
 .preview__error {

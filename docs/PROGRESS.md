@@ -55,6 +55,39 @@ Weak, WB +2R/-4B) — with granular Fuji-style effect controls.
 
 ---
 
+## 2026-07-02 (session 6, continued) — Phase 4: crop + free straighten
+
+Built after the library-UX batch, same session. The geometry chain follows
+the rotation pattern (fields + Rust export + quad-UV preview, lockstep):
+
+- **`Adjustments` grows `straighten: f32`** (degrees clockwise, UI ±45) and
+  **`crop: CropRect`** (normalized, top-left origin, defined in the
+  *straightened* frame). Both `#[serde(default)]`, ts-rs regenerated.
+  Geometry order (the contract): `apply_pixel` → `apply_grain` → rotate
+  quarter-turns → straighten (auto-zoomed) → crop.
+- **Rust export:** `apply_straighten` (bilinear rotate-about-center, zoomed by
+  the shared `straighten_cover_scale` so blank corners never show) and
+  `apply_crop` in export.rs. 6 new tests (54 total) — including one that pins
+  straighten's clockwise direction by matching `rotate90` on a square, and a
+  no-blank-corners sweep.
+- **Preview:** the whole geometry chain is quad-UV math in
+  `PreviewRenderer.writeQuad` (all three ops are affine → interpolating the 4
+  corners is exact; shader untouched). `coverScale` is the TS lockstep twin of
+  `straighten_cover_scale`.
+- **UI:** crop mode on the stage (⛶ in the toolbar) — the preview shows the
+  uncropped straightened frame with a drag-rect overlay (corner/edge handles,
+  rule-of-thirds grid, dimmed surround), plus a straighten slider (double-click
+  to zero), Reset (one undo step clearing both), Done/Esc. Crop mode pins the
+  view at Fit.
+- **Semantics fix:** presets and paste-adjustments now transfer the LOOK only —
+  each photo keeps its own rotation/straighten/crop (`withGeometryOf`).
+  Previously applying a preset would silently un-rotate a photo.
+
+`npm run build` + 54 Rust tests pass. **Pending human verification** (crop
+drag feel, straighten direction on a real horizon, preset-keeps-crop).
+
+---
+
 ## 2026-07-02 (session 5, wrap-up) — app-verified, tagged v0.3.0
 
 **Human verification passed.** The user ran the app with Fuji RAFs and Sony

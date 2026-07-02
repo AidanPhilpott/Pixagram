@@ -87,6 +87,46 @@ pub struct CurvePoint {
     pub y: f32,
 }
 
+/// A normalized crop rectangle, **top-left origin, y down**, all fields in
+/// `[0, 1]`. Defined in the *straightened* frame (after quarter-turn rotation
+/// AND straighten) — see the geometry pipeline note on [`Adjustments`].
+/// Default is the full frame (no crop).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/adjustments/generated/")]
+pub struct CropRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Default for CropRect {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0, width: 1.0, height: 1.0 }
+    }
+}
+
+impl CropRect {
+    /// True when the rect covers the whole frame (crop is a no-op).
+    pub fn is_full(&self) -> bool {
+        self.x <= 0.0 && self.y <= 0.0 && self.width >= 1.0 && self.height >= 1.0
+    }
+}
+
+/// Auto-zoom factor for a free straighten: the scale of the largest rectangle
+/// with the frame's aspect that fits inside the frame once it is rotated by
+/// `degrees` — so a straightened image never shows blank corners. Returns 1.0
+/// at 0°. **Lockstep with `coverScale` in `src/gl/PreviewRenderer.ts` — the
+/// formula must match exactly (WYSIWYG geometry).**
+pub fn straighten_cover_scale(width: f32, height: f32, degrees: f32) -> f32 {
+    let a = degrees.abs().to_radians();
+    let (sin, cos) = (a.sin(), a.cos());
+    let sx = width / (width * cos + height * sin);
+    let sy = height / (width * sin + height * cos);
+    sx.min(sy).min(1.0)
+}
+
 /// Most control points a curve can have (UI cap); keeps `curve_eval` allocation-free.
 const MAX_CURVE_POINTS: usize = 16;
 
@@ -167,6 +207,19 @@ pub struct Adjustments {
     /// quad-UV rotation + canvas aspect swap in `src/gl/PreviewRenderer.ts` on
     /// the preview side. Edit those two together.
     pub rotation: u8,
+    /// Free straighten in **degrees clockwise**, UI range [-45, +45], 0 = level.
+    /// Geometry: applied after the quarter-turn rotation, auto-zoomed by
+    /// [`straighten_cover_scale`] so no blank corners ever show. Rust side is
+    /// `export::apply_straighten`; preview side is the quad-UV math in
+    /// `PreviewRenderer.writeQuad`. Edit both together.
+    pub straighten: f32,
+    /// Crop rectangle, normalized to the **straightened** frame (after rotation
+    /// and straighten). Default full frame. Rust side is `export::apply_crop`;
+    /// preview side is `PreviewRenderer.writeQuad` + the canvas aspect. The
+    /// full geometry order — the contract both sides implement — is:
+    /// `apply_pixel` → `apply_grain` → rotate quarter-turns → straighten
+    /// (auto-zoomed) → crop.
+    pub crop: CropRect,
 }
 
 impl Default for Adjustments {
@@ -192,6 +245,8 @@ impl Default for Adjustments {
             grain: 0.0,
             grain_size: 0.0,
             rotation: 0,
+            straighten: 0.0,
+            crop: CropRect::default(),
         }
     }
 }

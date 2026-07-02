@@ -5,10 +5,23 @@
 > dated entry to [PROGRESS.md](PROGRESS.md) for the running history, and add any
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
-**Last updated:** 2026-07-02 (session 6 — Fuji-style effects + styled preset
-library, **needs in-app verification**)
-**Current phase:** Phase 3+ (presets extension, user-requested). On top of the
-verified `v0.3.0`:
+**Last updated:** 2026-07-02 (session 6 — effects + preset library + library
+UX + **Phase 4 crop/straighten**, all **needing in-app verification**)
+**Current phase:** Phase 4 (crop + free straighten) — **BUILT, unverified.**
+- **Crop + straighten (Phase 4):** `straighten` (degrees CW, ±45, auto-zoomed
+  via the lockstep `straighten_cover_scale` ↔ `coverScale` pair so no blank
+  corners) and `crop: CropRect` (normalized, in the straightened frame) on
+  `Adjustments`. Geometry order contract: pixel math → grain → quarter-rot →
+  straighten → crop; Rust `export::apply_straighten`/`apply_crop` ↔ quad-UV
+  math in `PreviewRenderer.writeQuad` (affine ⇒ 4-corner interpolation exact;
+  shader untouched). Stage crop mode: ⛶ button, drag rect + handles + thirds
+  grid, straighten slider, Reset/Done/Esc. Presets & paste now preserve each
+  photo's geometry (`withGeometryOf`) — applying a preset no longer un-rotates.
+- **Library UX:** ✎ edited-badges, Reset-to-original (inspector + menu,
+  undoable), custom thumbnail context menu (Reset / Copy-Paste adjustments /
+  Rotate / Show in Explorer via `reveal_in_file_manager`), webview default
+  menu suppressed. Batch writes funnel through `applyToPhotos`.
+On top of the verified `v0.3.0`:
 - **Effects (new, session 6):** four Fuji-style `Adjustments` fields —
   `grain`/`grain_size` (film grain: monochrome midtone-masked luminance noise,
   1–3px cells; **spatial**, so it's a new lockstep pair `apply_grain` ↔ the
@@ -76,21 +89,27 @@ them** (Vite hot-reload updates only the frontend).
 
 ## ⚠️ START HERE NEXT SESSION
 
-**First: human-verify session 6** (effects + preset library) in the app —
-grain looks like film (not static) at Weak/Small and Strong/Large, color
-chrome deepens saturated reds/blues without touching greys, "Classic
-Portrait" flatters skin on a real portrait RAF, all 11 built-ins listed and
-applying. Then continue the phase order:
-1. **Phase 4 leftovers: crop + free straighten** (90° rotate is done and
-   persists). Both are geometry like rotation — follow its pattern: field(s)
-   on `Adjustments` (`#[serde(default)]` + ts-rs), GPU-side geometry in
-   `PreviewRenderer`, Rust-side in `export.rs`, lockstep documented in
-   `adjustments.rs`.
-2. **Phase 5 export:** real JPEG + borders + sRGB tag + batch + naming. Settle
-   two open decisions with the user first: **EXIF policy** (preserve / strip /
+**First: human-verify the whole session-6 batch in the app** (relaunch the
+dev task first — built-ins/commands live in the Rust binary):
+- Presets: 11 built-ins listed; Soft Film reads as a gentle fade (not milky);
+  "Classic Portrait" flatters skin on a real portrait RAF.
+- Effects: grain looks like film at Weak/Small vs Strong/Large; color chrome
+  deepens saturated reds/blues, greys untouched.
+- Library UX: ✎ badge tracks edits/reset/undo; context-menu actions on a
+  multi-selection; Show in Explorer highlights the file.
+- **Phase 4:** crop drag feel (handles, move, thirds grid), straighten slider
+  direction on a real horizon (positive = clockwise), Reset/Done/Esc, crop
+  survives restart (persisted stack), preset apply keeps the crop, undo of
+  crop/straighten steps. Tag (v0.4.0) once verified.
+
+Then:
+1. **Phase 5 export:** real JPEG + borders + sRGB tag + batch + naming. The
+   per-image chain is documented in export.rs: `apply_pixel` → `apply_grain`
+   → `apply_rotation` → `apply_straighten` → `apply_crop`. Settle two open
+   decisions with the user first: **EXIF policy** (preserve / strip /
    preserve-minus-GPS) and the **export-quality demosaic** (area-averaging is
    preview-grade; full-res export wants Markesteijn-class — see Open risks).
-3. Then Phase 6 polish (undo/redo shipped early; caching + UI refinement
+2. Then Phase 6 polish (undo/redo shipped early; caching + UI refinement
    remain), Phase 7 macOS.
 
 **Dev launch:** `Start-ScheduledTask -TaskName PixagramDev` → `run-dev.cmd`

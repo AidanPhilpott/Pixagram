@@ -56,7 +56,10 @@ Desktop-first (PC → macOS later). The authoritative brief is [README.md](READM
   JSON preset store + built-ins + batch apply, plus undo/redo, zoom/pan,
   rotation, persistence, multi-format RAW. Session 6 extended it with
   Fuji-style effects (grain, color chrome) and a styled built-in library.
-- **Next: Phase 4 leftovers (crop + straighten), then Phase 5 export.**
+- **Phase 4 (crop + free straighten): built, pending in-app verification.**
+  Geometry chain: pixel math → grain → quarter-rotation → straighten
+  (auto-zoomed) → crop; Rust `export.rs` ↔ quad-UV math in `PreviewRenderer`.
+- **Next: verify Phase 4 in-app (then tag v0.4.0), then Phase 5 export.**
   See docs/HANDOFF.md.
 
 ## Conventions

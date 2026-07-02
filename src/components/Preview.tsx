@@ -1,14 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PreviewRenderer } from "../gl/PreviewRenderer";
+import { CropOverlay } from "./CropOverlay";
 import type { PreviewPayload } from "../lib/ipc";
-import type { Adjustments } from "../adjustments/definition";
+import {
+  STRAIGHTEN_RANGE,
+  fullFrameCrop,
+  type Adjustments,
+  type CropRect,
+} from "../adjustments/definition";
 
 interface PreviewProps {
   preview: PreviewPayload | null;
   adjustments: Adjustments;
   loading: boolean;
+  /** False while no photo is selected or the Original view is active. */
+  editable: boolean;
   /** Rotate the selected photo by ±1 clockwise quarter-turn. */
   onRotate: (quarterTurns: 1 | -1) => void;
+  /** Free-straighten the selected photo (degrees clockwise). */
+  onStraightenChange: (degrees: number) => void;
+  /** Replace the selected photo's crop rect (normalized, straightened frame). */
+  onCropChange: (crop: CropRect) => void;
+  /** Clear crop + straighten in one undoable step. */
+  onResetGeometry: () => void;
 }
 
 /**
@@ -33,11 +47,33 @@ function decodeU16(b64: string): Uint16Array {
 }
 
 /** WebGL live preview. Re-renders on adjustment change without re-decoding. */
-export function Preview({ preview, adjustments, loading, onRotate }: PreviewProps) {
+export function Preview({
+  preview,
+  adjustments,
+  loading,
+  editable,
+  onRotate,
+  onStraightenChange,
+  onCropChange,
+  onResetGeometry,
+}: PreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<PreviewRenderer | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Crop mode ──
+  // While active, the renderer shows the UNCROPPED (but straightened) frame and
+  // the overlay draws the crop rect on top — the rect's normalized coordinates
+  // and the displayed frame are then the same space, which is also the space
+  // `Adjustments.crop` is defined in.
+  const [cropMode, setCropMode] = useState(false);
+  const cropModeRef = useRef(cropMode);
+  cropModeRef.current = cropMode;
+  const displayAdjustments = useMemo(
+    () => (cropMode ? { ...adjustments, crop: fullFrameCrop() } : adjustments),
+    [adjustments, cropMode]
+  );
 
   // ── Zoom / pan ──
   const [view, setView] = useState<View | null>(null);
@@ -93,11 +129,71 @@ export function Preview({ preview, adjustments, loading, onRotate }: PreviewProp
     else setView({ scale: Math.max(1, nativeScale()), tx: 0, ty: 0 });
   }, [nativeScale]);
 
-  // Reset to Fit when the photo or its orientation changes — the canvas
-  // aspect just swapped under the transform, so any old pan is meaningless.
+  // Reset to Fit when the photo or its frame geometry changes — the canvas
+  // aspect just changed under the transform, so any old pan is meaningless.
   useEffect(() => {
     setView(null);
-  }, [preview, adjustments.rotation]);
+  }, [
+    preview,
+    adjustments.rotation,
+    adjustments.crop.width,
+    adjustments.crop.height,
+  ]);
+
+  // Crop mode lifecycle: always work at Fit; leave the mode when the photo
+  // changes or editing is disabled (Original view / nothing selected).
+  useEffect(() => {
+    if (cropMode) setView(null);
+  }, [cropMode]);
+  useEffect(() => {
+    setCropMode(false);
+  }, [preview]);
+  useEffect(() => {
+    if (!editable) setCropMode(false);
+  }, [editable]);
+  useEffect(() => {
+    if (!cropMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCropMode(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [cropMode]);
+
+  // The canvas's box in container coordinates — the crop overlay's frame.
+  const [cropBox, setCropBox] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    if (!cropMode) {
+      setCropBox(null);
+      return;
+    }
+    const measure = () => {
+      const canvas = canvasRef.current;
+      const container = containerRef.current;
+      if (!canvas || !container) return;
+      const c = canvas.getBoundingClientRect();
+      const p = container.getBoundingClientRect();
+      setCropBox({
+        left: c.left - p.left,
+        top: c.top - p.top,
+        width: c.width,
+        height: c.height,
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (canvasRef.current) ro.observe(canvasRef.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [cropMode, preview, adjustments.rotation]);
 
   // Wheel zoom, attached natively so preventDefault works (React's wheel
   // listeners are passive) and the page never scroll-bounces.
@@ -106,6 +202,7 @@ export function Preview({ preview, adjustments, loading, onRotate }: PreviewProp
     if (!container) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (cropModeRef.current) return; // crop mode pins the view at Fit
       zoomBy(Math.exp(-e.deltaY * WHEEL_ZOOM_RATE), e.clientX, e.clientY);
     };
     container.addEventListener("wheel", onWheel, { passive: false });
@@ -152,7 +249,7 @@ export function Preview({ preview, adjustments, loading, onRotate }: PreviewProp
     try {
       const data = decodeU16(preview.data);
       renderer.setImage(preview.width, preview.height, data);
-      renderer.setAdjustments(adjustments);
+      renderer.setAdjustments(displayAdjustments);
     } catch {
       setError("Failed to decode preview pixel data.");
     }
@@ -162,8 +259,8 @@ export function Preview({ preview, adjustments, loading, onRotate }: PreviewProp
 
   // Cheap GPU-only update on any adjustment change.
   useEffect(() => {
-    rendererRef.current?.setAdjustments(adjustments);
-  }, [adjustments]);
+    rendererRef.current?.setAdjustments(displayAdjustments);
+  }, [displayAdjustments]);
 
   // Readout: percentage of native preview pixels currently on screen.
   const zoomPercent = view
@@ -194,9 +291,12 @@ export function Preview({ preview, adjustments, loading, onRotate }: PreviewProp
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onDoubleClick={toggleFitNative}
+        onDoubleClick={cropMode ? undefined : toggleFitNative}
       />
-      {preview && !loading && (
+      {cropMode && cropBox && preview && !loading && (
+        <CropOverlay box={cropBox} crop={adjustments.crop} onChange={onCropChange} />
+      )}
+      {preview && !loading && !cropMode && (
         <div className="stage__toolbar">
           <button className="stage__tool" title="Zoom out" onClick={() => zoomBy(1 / 1.5)}>
             −
@@ -225,6 +325,42 @@ export function Preview({ preview, adjustments, loading, onRotate }: PreviewProp
             onClick={() => onRotate(1)}
           >
             ⟳
+          </button>
+          <span className="stage__sep" />
+          <button
+            className="stage__tool"
+            title="Crop & straighten"
+            disabled={!editable}
+            onClick={() => setCropMode(true)}
+          >
+            ⛶
+          </button>
+        </div>
+      )}
+      {preview && !loading && cropMode && (
+        <div className="stage__toolbar stage__toolbar--crop">
+          <input
+            className="stage__straighten"
+            type="range"
+            min={STRAIGHTEN_RANGE.min}
+            max={STRAIGHTEN_RANGE.max}
+            step={STRAIGHTEN_RANGE.step}
+            value={adjustments.straighten}
+            title="Straighten (degrees)"
+            onChange={(e) => onStraightenChange(parseFloat(e.target.value))}
+            onDoubleClick={() => onStraightenChange(0)}
+          />
+          <span className="stage__zoom">{adjustments.straighten.toFixed(1)}°</span>
+          <span className="stage__sep" />
+          <button className="stage__tool stage__label" onClick={onResetGeometry} title="Clear crop and straighten">
+            Reset
+          </button>
+          <button
+            className="stage__tool stage__label"
+            onClick={() => setCropMode(false)}
+            title="Apply and leave crop mode (Esc)"
+          >
+            Done
           </button>
         </div>
       )}

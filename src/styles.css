@@ -180,6 +180,7 @@ body {
   gap: 4px;
   overflow: hidden;
   transition: border-color 120ms ease, transform 120ms ease;
+  position: relative; /* anchors the edited badge */
 }
 .thumb:hover {
   border-color: var(--border-strong);
@@ -220,6 +221,62 @@ body {
   text-overflow: ellipsis;
   text-align: left;
   padding: 0 2px;
+}
+/* Corner badge on photos that carry a persisting edit. */
+.thumb__edited {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(14, 15, 17, 0.85);
+  color: var(--accent);
+  font-size: 9px;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+/* ── Context menu (replaces the webview default) ─────── */
+.context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+.context-menu__item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.context-menu__item:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.context-menu__item:disabled {
+  color: var(--text-dim);
+  opacity: 0.55;
+  cursor: default;
+}
+.context-menu__separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-strong);
 }
 
 /* ── Preview stage ───────────────────────────────────── */

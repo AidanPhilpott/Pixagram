@@ -64,6 +64,34 @@ export function defaultAdjustments(): Adjustments {
   };
 }
 
+/**
+ * True when a stack is indistinguishable from the neutral defaults — i.e. the
+ * photo has no persisting edit. Drives the grid's "edited" badge. Curve points
+ * all on the diagonal count as identity (a monotonic spline through collinear
+ * points IS the straight line); rotation counts as an edit.
+ */
+export function isNeutralAdjustments(a: Adjustments): boolean {
+  return (
+    a.exposure === 0 &&
+    a.contrast === 0 &&
+    a.temperature === 0 &&
+    a.tint === 0 &&
+    a.highlights === 0 &&
+    a.shadows === 0 &&
+    a.whites === 0 &&
+    a.blacks === 0 &&
+    a.saturation === 0 &&
+    a.vibrance === 0 &&
+    a.colorChrome === 0 &&
+    a.colorChromeBlue === 0 &&
+    a.grain === 0 &&
+    a.grainSize === 0 &&
+    a.rotation === 0 &&
+    a.hsl.every((b) => b.hue === 0 && b.sat === 0 && b.lum === 0) &&
+    a.curve.every((p) => p.x === p.y)
+  );
+}
+
 /** UI bounds for the exposure slider (stops). Tunable constant, not architecture. */
 export const EXPOSURE_RANGE = { min: -5, max: 5, step: 0.01 } as const;
 

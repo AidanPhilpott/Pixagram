@@ -43,6 +43,15 @@ Weak, WB +2R/-4B) — with granular Fuji-style effect controls.
   white-point arithmetic check to the skill. Also hardened `cloneAdjustments`
   to default-fill fields missing from stale-binary IPC payloads (undefined →
   NaN uniforms). 48 Rust tests pass.
+- **Library UX (user requests):** (1) thumbnails now show a corner ✎ badge
+  when the photo has a persisting edit (`isNeutralAdjustments` in
+  definition.ts); (2) Reset-to-original — inspector-head button + context
+  menu, batch-aware and undoable (new `applyToPhotos` batch helper that
+  applyPreset/reset/paste/rotate all funnel through); (3) the webview's
+  default right-click menu is suppressed app-wide and thumbnails get a
+  product context menu: Reset, Copy/Paste adjustments (paste preserves the
+  target's rotation, Lightroom convention), Rotate CW/CCW, Show in Explorer
+  (new `reveal_in_file_manager` Rust command, per-OS).
 
 ---
 

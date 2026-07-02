@@ -91,6 +91,44 @@ fn export_stub(path: String, adjustments: Adjustments) -> Result<String, String>
     export::export_stub(&path, &adjustments).map_err(|e| e.to_string())
 }
 
+/// Reveal a file in the OS file manager (Explorer on Windows, Finder on
+/// macOS, the containing directory elsewhere). Backs the thumbnail context
+/// menu's "Show in Explorer".
+#[tauri::command]
+fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    if !Path::new(&path).exists() {
+        return Err(format!("file no longer exists: {path}"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // `/select,<path>` must be ONE argument — Explorer's parser splits on
+        // the comma itself and quotes around the combined arg are fine.
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{path}"))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let dir = Path::new(&path)
+            .parent()
+            .ok_or_else(|| "no parent directory".to_string())?;
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Resolve the on-disk preset store (`<app-data>/presets/`). The store
 /// functions take the directory explicitly so tests can inject a temp dir.
 fn presets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -161,6 +199,7 @@ pub fn run() {
             list_images,
             decode_preview,
             export_stub,
+            reveal_in_file_manager,
             list_presets,
             save_preset,
             delete_preset,

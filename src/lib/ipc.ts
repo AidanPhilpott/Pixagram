@@ -59,6 +59,11 @@ export function exportStub(path: string, adjustments: Adjustments): Promise<stri
   return invoke<string>("export_stub", { path, adjustments });
 }
 
+/** Reveal a file in the OS file manager (Explorer/Finder). */
+export function revealInFileManager(path: string): Promise<void> {
+  return invoke("reveal_in_file_manager", { path });
+}
+
 /** List built-in + user presets (built-ins first). */
 export function listPresets(): Promise<Preset[]> {
   return invoke<Preset[]>("list_presets");

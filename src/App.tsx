@@ -13,6 +13,7 @@ import { CollapsibleSection } from "./components/CollapsibleSection";
 import { HslPanel } from "./components/HslPanel";
 import { CurveEditor } from "./components/CurveEditor";
 import { PresetPanel } from "./components/PresetPanel";
+import { ContextMenu, type ContextMenuItem } from "./components/ContextMenu";
 import {
   decodePreview,
   deletePreset,
@@ -22,6 +23,7 @@ import {
   loadStacks,
   pickRawFiles,
   renamePreset,
+  revealInFileManager,
   savePreset,
   saveStacks,
   type ImageEntry,
@@ -36,6 +38,7 @@ import {
   TONE_RANGE,
   WB_RANGE,
   defaultAdjustments,
+  isNeutralAdjustments,
   type Adjustments,
   type CurvePoint,
   type HslBand,
@@ -446,29 +449,158 @@ export function App() {
     void refreshPresets();
   }, [refreshPresets]);
 
-  // Replace the stack of every selected photo with the preset's adjustments.
-  // Each photo gets its own undo snapshot, so an apply is one Ctrl+Z away —
-  // batch writes can't go through applyEdit (it's single-photo), so this
-  // pushes history itself.
-  const applyPreset = useCallback(
-    (preset: Preset) => {
-      if (selectedIds.size === 0) return;
+  // Batch counterpart to applyEdit: transform the stack of every given photo,
+  // pushing one undo snapshot per photo so the whole batch is one Ctrl+Z away.
+  // Every multi-photo stack write (preset apply, reset, paste, batch rotate)
+  // funnels through here.
+  const applyToPhotos = useCallback(
+    (ids: Iterable<string>, transform: (current: Adjustments) => Adjustments) => {
       const next = { ...stacksRef.current };
-      for (const id of selectedIds) {
+      let count = 0;
+      for (const id of ids) {
+        const current = next[id] ?? defaultAdjustments();
         const h = (historyRef.current[id] ??= { past: [], future: [] });
-        h.past.push(next[id] ?? defaultAdjustments());
+        h.past.push(current);
         if (h.past.length > HISTORY_CAP) h.past.shift();
         h.future = [];
-        next[id] = cloneAdjustments(preset.adjustments);
+        next[id] = transform(current);
+        count++;
       }
+      if (count === 0) return 0;
       lastEditRef.current = null; // the next edit starts a fresh undo step
       stacksRef.current = next;
       setStacks(next);
-      const n = selectedIds.size;
-      setStatus(`Applied "${preset.name}" to ${n} photo${n === 1 ? "" : "s"}`);
+      return count;
     },
-    [selectedIds]
+    []
   );
+
+  // Replace the stack of every selected photo with the preset's adjustments.
+  const applyPreset = useCallback(
+    (preset: Preset) => {
+      const n = applyToPhotos(selectedIds, () => cloneAdjustments(preset.adjustments));
+      if (n > 0) setStatus(`Applied "${preset.name}" to ${n} photo${n === 1 ? "" : "s"}`);
+    },
+    [selectedIds, applyToPhotos]
+  );
+
+  // Reset photos to their as-shot state (the neutral stack, rotation included).
+  // Undoable like any other stack write.
+  const resetPhotos = useCallback(
+    (ids: Iterable<string>) => {
+      const n = applyToPhotos(ids, () => defaultAdjustments());
+      if (n > 0) setStatus(`Reset ${n} photo${n === 1 ? "" : "s"} to original`);
+    },
+    [applyToPhotos]
+  );
+
+  // ── Copy / paste adjustments (context menu) ──────────────────────────────
+  // Copies everything EXCEPT rotation — orientation is per-shot geometry, not
+  // part of a transferable look (matches the Lightroom convention). State (not
+  // a ref) so the Paste menu item's disabled state re-renders.
+  const [copiedAdjustments, setCopiedAdjustments] = useState<Adjustments | null>(null);
+
+  const copyAdjustments = useCallback(
+    (id: string) => {
+      setCopiedAdjustments(cloneAdjustments(stacksRef.current[id] ?? defaultAdjustments()));
+      setStatus("Copied adjustments");
+    },
+    []
+  );
+
+  const pasteAdjustments = useCallback(
+    (ids: Iterable<string>) => {
+      if (!copiedAdjustments) return;
+      const n = applyToPhotos(ids, (cur) => ({
+        ...cloneAdjustments(copiedAdjustments),
+        rotation: cur.rotation,
+      }));
+      if (n > 0) setStatus(`Pasted adjustments to ${n} photo${n === 1 ? "" : "s"}`);
+    },
+    [copiedAdjustments, applyToPhotos]
+  );
+
+  // ── Thumbnail context menu ────────────────────────────────────────────────
+  // Photos with a persisting edit — drives the grid's "edited" badge.
+  const editedIds = useMemo(() => {
+    const out = new Set<string>();
+    for (const [id, adj] of Object.entries(stacks)) {
+      if (!isNeutralAdjustments(adj)) out.add(id);
+    }
+    return out;
+  }, [stacks]);
+
+  // True when anything in the selection has edits to discard (Reset enabled).
+  const isEditedSelection = useMemo(
+    () => [...selectedIds].some((id) => editedIds.has(id)),
+    [selectedIds, editedIds]
+  );
+
+  // Open state: screen position + the photos the menu's actions target + the
+  // photo that was actually right-clicked (source for single-photo actions).
+  const [menu, setMenu] = useState<{ x: number; y: number; ids: string[]; clicked: ImageEntry } | null>(null);
+
+  const handleThumbContext = useCallback(
+    (entry: ImageEntry, e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Right-clicking inside the current selection targets the whole
+      // selection; outside it re-selects just that photo (file-manager norm).
+      let ids: string[];
+      if (selectedIds.has(entry.id)) {
+        ids = [...selectedIds];
+      } else {
+        ids = [entry.id];
+        setSelectedIds(new Set([entry.id]));
+        setSelectedId(entry.id);
+        void loadPreview(entry);
+      }
+      setMenu({ x: e.clientX, y: e.clientY, ids, clicked: entry });
+    },
+    [selectedIds, loadPreview]
+  );
+
+  const menuItems = useMemo((): ContextMenuItem[] => {
+    if (!menu) return [];
+    const n = menu.ids.length;
+    const forN = n > 1 ? ` (${n} photos)` : "";
+    return [
+      {
+        label: `Reset to original${forN}`,
+        disabled: !menu.ids.some((id) => editedIds.has(id)),
+        onClick: () => resetPhotos(menu.ids),
+      },
+      { separator: true },
+      { label: "Copy adjustments", onClick: () => copyAdjustments(menu.clicked.id) },
+      {
+        label: `Paste adjustments${forN}`,
+        disabled: !copiedAdjustments,
+        onClick: () => pasteAdjustments(menu.ids),
+      },
+      { separator: true },
+      {
+        label: `Rotate 90° CW${forN}`,
+        onClick: () => {
+          applyToPhotos(menu.ids, (cur) => ({ ...cur, rotation: (cur.rotation + 1) % 4 }));
+        },
+      },
+      {
+        label: `Rotate 90° CCW${forN}`,
+        onClick: () => {
+          applyToPhotos(menu.ids, (cur) => ({ ...cur, rotation: (cur.rotation + 3) % 4 }));
+        },
+      },
+      { separator: true },
+      {
+        label: "Show in Explorer",
+        onClick: () => {
+          revealInFileManager(menu.clicked.path).catch((e) =>
+            setStatus(`Reveal failed: ${e instanceof Error ? e.message : String(e)}`)
+          );
+        },
+      },
+    ];
+  }, [menu, editedIds, copiedAdjustments, resetPhotos, copyAdjustments, pasteAdjustments, applyToPhotos]);
 
   // Save/delete/rename report success back to the panel (so its inline name
   // inputs know whether to close) and surface errors in the status line.
@@ -514,7 +646,14 @@ export function App() {
   );
 
   return (
-    <div className="app">
+    // A photo tool owns its right-click: suppress the webview's default menu
+    // everywhere except text fields (where paste/spellcheck still matter).
+    <div
+      className="app"
+      onContextMenu={(e) => {
+        if (!isTextInput(e.target)) e.preventDefault();
+      }}
+    >
       <header className="topbar">
         <div className="topbar__brand">
           <span className="topbar__mark" />
@@ -540,7 +679,9 @@ export function App() {
             entries={entries}
             primaryId={selectedId}
             selectedIds={selectedIds}
+            editedIds={editedIds}
             onSelect={handleSelect}
+            onContext={handleThumbContext}
           />
         </aside>
 
@@ -559,6 +700,15 @@ export function App() {
             <h2 className="inspector__title">
               {selected ? selected.fileName : "Adjustments"}
             </h2>
+            <button
+              type="button"
+              className="original-toggle"
+              onClick={() => resetPhotos(selectedIds)}
+              disabled={!selected || !isEditedSelection}
+              title="Discard all edits and return to the as-shot original (undoable)"
+            >
+              Reset
+            </button>
             <button
               type="button"
               className={`original-toggle${pinOriginal ? " original-toggle--on" : ""}`}
@@ -607,6 +757,10 @@ export function App() {
           {status && <div className="inspector__status">{status}</div>}
         </aside>
       </main>
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
     </div>
   );
 }

@@ -25,6 +25,12 @@ verified `v0.3.0`:
   Hour, Cinema Teal, Faded Matte, Grainy Mono. The recipe's NR / Sharpening /
   Clarity / DR-Auto have **no counterpart ops yet** — candidates for a future
   session if the user wants closer emulation.
+- **Library UX (session 6, user requests):** ✎ edited-badge on thumbnails
+  (`editedIds` via `isNeutralAdjustments`), Reset-to-original (inspector
+  button + menu; undoable), and a custom thumbnail context menu (Reset /
+  Copy-Paste adjustments / Rotate / Show in Explorer via new
+  `reveal_in_file_manager` command) with the webview default menu suppressed
+  app-wide. Batch stack writes now funnel through `applyToPhotos`.
 - **`/fuji-recipe-to-preset` skill (session 6):** repeatable recipe→preset
   conversion — capture recipe (URL/pasted), non-infringing name, base-sim
   starting point + per-setting formulas, deliver as user-preset JSON

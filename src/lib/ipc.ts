@@ -69,3 +69,13 @@ export function deletePreset(name: string): Promise<void> {
 export function renamePreset(oldName: string, newName: string): Promise<void> {
   return invoke("rename_preset", { oldName, newName });
 }
+
+/** Load the persisted per-image edit stacks (empty map on first run). */
+export function loadStacks(): Promise<Record<string, Adjustments>> {
+  return invoke<Record<string, Adjustments>>("load_stacks");
+}
+
+/** Persist the full per-image edit-stack map (last-write-wins). */
+export function saveStacks(stacks: Record<string, Adjustments>): Promise<void> {
+  return invoke("save_stacks", { stacks });
+}

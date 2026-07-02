@@ -77,4 +77,12 @@ hsl: Array<HslBand>,
  * Tone-curve control points, sorted by `x`, both axes in [0,1]. Default is
  * the identity line `[(0,0), (1,1)]`. Applied per channel after contrast.
  */
-curve: Array<CurvePoint>, };
+curve: Array<CurvePoint>, 
+/**
+ * Rotation in **clockwise quarter-turns**, `0..=3` (0 = as shot). Geometry,
+ * not color — deliberately absent from `apply_pixel`. Applied once per image
+ * after the pixel math: `export::apply_rotation` on the Rust side, the
+ * quad-UV rotation + canvas aspect swap in `src/gl/PreviewRenderer.ts` on
+ * the preview side. Edit those two together.
+ */
+rotation: number, };

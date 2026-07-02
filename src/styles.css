@@ -257,6 +257,8 @@ body {
   justify-content: center;
   width: 100%;
   height: 100%;
+  /* A zoomed (CSS-transformed) canvas must clip to the stage, not spill over. */
+  overflow: hidden;
 }
 .preview__canvas {
   max-width: 100%;
@@ -267,6 +269,53 @@ body {
   box-shadow: var(--shadow);
   background: #0e0f11;
 }
+/* Floating stage toolbar: rotate + zoom controls over the photo. */
+.stage__toolbar {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(20, 21, 23, 0.78);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(8px);
+  z-index: 2;
+}
+.stage__tool {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  min-width: 26px;
+  height: 24px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.stage__tool:hover {
+  background: var(--panel-raised);
+  color: var(--text);
+}
+.stage__sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border-strong);
+  margin: 0 3px;
+}
+.stage__zoom {
+  min-width: 42px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .preview__loading,
 .preview__error {
   position: absolute;

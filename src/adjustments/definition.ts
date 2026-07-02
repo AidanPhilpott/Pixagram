@@ -56,6 +56,7 @@ export function defaultAdjustments(): Adjustments {
     vibrance: 0,
     hsl: HSL_BANDS.map(() => ({ hue: 0, sat: 0, lum: 0 })),
     curve: identityCurve(),
+    rotation: 0,
   };
 }
 

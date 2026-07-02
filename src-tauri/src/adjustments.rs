@@ -37,6 +37,13 @@
 //!
 //! This is the full Phase-2 color pipeline. Order matters and is the contract —
 //! keep it identical here and in the GLSL shader.
+//!
+//! **Geometry (rotation) is NOT part of `apply_pixel`.** The `rotation` field is
+//! quarter-turn geometry applied once per image, *after* all pixel math: the
+//! exporter calls [`crate::export::apply_rotation`] (`image` crate
+//! rotate90/180/270) and the GPU preview rotates the quad's texture coordinates
+//! and swaps the canvas aspect (`applyGeometry` in `src/gl/PreviewRenderer.ts`).
+//! Both are clockwise quarter-turns — keep the two sides in lockstep.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -124,6 +131,12 @@ pub struct Adjustments {
     /// Tone-curve control points, sorted by `x`, both axes in [0,1]. Default is
     /// the identity line `[(0,0), (1,1)]`. Applied per channel after contrast.
     pub curve: Vec<CurvePoint>,
+    /// Rotation in **clockwise quarter-turns**, `0..=3` (0 = as shot). Geometry,
+    /// not color — deliberately absent from `apply_pixel`. Applied once per image
+    /// after the pixel math: `export::apply_rotation` on the Rust side, the
+    /// quad-UV rotation + canvas aspect swap in `src/gl/PreviewRenderer.ts` on
+    /// the preview side. Edit those two together.
+    pub rotation: u8,
 }
 
 impl Default for Adjustments {
@@ -144,6 +157,7 @@ impl Default for Adjustments {
                 CurvePoint { x: 0.0, y: 0.0 },
                 CurvePoint { x: 1.0, y: 1.0 },
             ],
+            rotation: 0,
         }
     }
 }

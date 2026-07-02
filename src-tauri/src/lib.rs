@@ -1,9 +1,10 @@
 //! Pixagram core — thin Tauri shell over the portable image engine.
 //!
-//! IPC surface (Phase 1):
+//! IPC surface:
 //! - `list_images`   — build grid entries (path + camera-JPEG thumbnail).
 //! - `decode_preview` — lazily decode/develop one RAF into a downscaled preview.
 //! - `export_stub`   — confirm the shared `Adjustments` reaches Rust end-to-end.
+//! - `save_stacks` / `load_stacks` — persist the per-image edit stacks as JSON.
 //!
 //! Phase 3 (presets):
 //! - `list_presets` / `save_preset` / `delete_preset` / `rename_preset` — the
@@ -14,7 +15,9 @@ mod develop;
 mod export;
 mod presets;
 mod raf;
+mod store;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use adjustments::Adjustments;
@@ -129,6 +132,27 @@ fn rename_preset(
     presets::rename_preset(&presets_dir(&app)?, &old_name, &new_name).map_err(|e| e.to_string())
 }
 
+/// Where the edit-stack store lives: `<app data dir>/edit-stacks.json`. The
+/// store functions themselves take the path (keeps them unit-testable).
+fn stacks_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join("edit-stacks.json"))
+        .map_err(|e| e.to_string())
+}
+
+/// Persist the full per-image edit-stack map (last-write-wins).
+#[tauri::command]
+fn save_stacks(app: tauri::AppHandle, stacks: HashMap<String, Adjustments>) -> Result<(), String> {
+    store::save_stacks_to(&stacks_path(&app)?, stacks).map_err(|e| e.to_string())
+}
+
+/// Load the persisted per-image edit stacks (empty map on first run).
+#[tauri::command]
+fn load_stacks(app: tauri::AppHandle) -> Result<HashMap<String, Adjustments>, String> {
+    store::load_stacks_from(&stacks_path(&app)?).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -140,7 +164,9 @@ pub fn run() {
             list_presets,
             save_preset,
             delete_preset,
-            rename_preset
+            rename_preset,
+            save_stacks,
+            load_stacks
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pixagram");

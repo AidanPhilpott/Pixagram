@@ -30,6 +30,7 @@ export class PreviewRenderer {
   private uHslActive: WebGLUniformLocation | null;
   private uCurveActive: WebGLUniformLocation | null;
   private curveTexture: WebGLTexture | null = null;
+  private quadBuffer: WebGLBuffer | null = null;
   /** True when float textures + linear filtering are available (16-bit preview). */
   private floatLinear = false;
   // Reused scratch buffers so per-frame uniform uploads don't allocate.
@@ -37,6 +38,11 @@ export class PreviewRenderer {
   private hslSat = new Float32Array(8);
   private hslLum = new Float32Array(8);
   private hasImage = false;
+  // Unrotated (as-decoded) image dimensions; the canvas swaps them for 90°/270°.
+  private imgWidth = 0;
+  private imgHeight = 0;
+  /** Rotation the canvas/quad currently reflect (clockwise quarter-turns). */
+  private appliedRotation = 0;
   private adjustments: Adjustments = defaultAdjustments();
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -56,18 +62,11 @@ export class PreviewRenderer {
     this.program = this.buildProgram(VERTEX_SHADER, FRAGMENT_SHADER);
     gl.useProgram(this.program);
 
-    // Full-canvas quad: two triangles. Interleaved [x, y, u, v].
-    const quad = new Float32Array([
-      -1, -1, 0, 0,
-      1, -1, 1, 0,
-      -1, 1, 0, 1,
-      -1, 1, 0, 1,
-      1, -1, 1, 0,
-      1, 1, 1, 1,
-    ]);
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+    // Full-canvas quad: two triangles. Interleaved [x, y, u, v]. The UVs are
+    // rewritten by writeQuad whenever the stack's rotation changes.
+    this.quadBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
+    this.writeQuad(0);
 
     const stride = 4 * Float32Array.BYTES_PER_ELEMENT;
     const aPosition = gl.getAttribLocation(this.program, "aPosition");
@@ -119,9 +118,10 @@ export class PreviewRenderer {
    */
   setImage(width: number, height: number, data: Uint16Array): void {
     const gl = this.gl;
-    this.canvas.width = width;
-    this.canvas.height = height;
-    gl.viewport(0, 0, width, height);
+    this.imgWidth = width;
+    this.imgHeight = height;
+    // Canvas size + quad UVs depend on the current rotation (geometry, not color).
+    this.applyGeometry();
 
     if (this.texture) gl.deleteTexture(this.texture);
     this.texture = gl.createTexture();
@@ -160,7 +160,57 @@ export class PreviewRenderer {
   /** Push the whole adjustment stack into the shader uniforms and redraw. */
   setAdjustments(adj: Adjustments): void {
     this.adjustments = adj;
+    // Rotation is geometry (quad UVs + canvas aspect), not a shader uniform.
+    // Mirror of Rust `export::apply_rotation` — both rotate clockwise.
+    const rotation = ((adj.rotation % 4) + 4) % 4;
+    if (rotation !== this.appliedRotation) {
+      this.appliedRotation = rotation;
+      this.applyGeometry();
+    }
     this.render();
+  }
+
+  /** Size the canvas for the applied rotation and rotate the quad's UVs. */
+  private applyGeometry(): void {
+    const gl = this.gl;
+    const swap = this.appliedRotation % 2 === 1;
+    const w = swap ? this.imgHeight : this.imgWidth;
+    const h = swap ? this.imgWidth : this.imgHeight;
+    if (w > 0 && h > 0) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+      gl.viewport(0, 0, w, h);
+    }
+    this.writeQuad(this.appliedRotation);
+  }
+
+  /**
+   * Upload the full-canvas quad with its UVs rotated by `rot` clockwise
+   * quarter-turns. Each turn maps (u, v) → (1 − v, u), which shows the texture
+   * rotated clockwise on screen — matching Rust `apply_rotation` (rotate90 is
+   * clockwise in the `image` crate). Keep the two in lockstep.
+   */
+  private writeQuad(rot: number): void {
+    const gl = this.gl;
+    const uv = (u: number, v: number): [number, number] => {
+      for (let i = 0; i < rot; i++) [u, v] = [1 - v, u];
+      return [u, v];
+    };
+    const bl = uv(0, 0);
+    const br = uv(1, 0);
+    const tl = uv(0, 1);
+    const tr = uv(1, 1);
+    // Interleaved [x, y, u, v], two triangles.
+    const quad = new Float32Array([
+      -1, -1, bl[0], bl[1],
+      1, -1, br[0], br[1],
+      -1, 1, tl[0], tl[1],
+      -1, 1, tl[0], tl[1],
+      1, -1, br[0], br[1],
+      1, 1, tr[0], tr[1],
+    ]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
   }
 
   render(): void {
@@ -215,6 +265,7 @@ export class PreviewRenderer {
     const gl = this.gl;
     if (this.texture) gl.deleteTexture(this.texture);
     if (this.curveTexture) gl.deleteTexture(this.curveTexture);
+    if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
     gl.deleteProgram(this.program);
   }
 

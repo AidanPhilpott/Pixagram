@@ -19,9 +19,11 @@ import {
   exportStub,
   listImages,
   listPresets,
+  loadStacks,
   pickRafFiles,
   renamePreset,
   savePreset,
+  saveStacks,
   type ImageEntry,
   type Preset,
   type PreviewPayload,
@@ -137,6 +139,31 @@ export function App() {
   // Cache developed previews by id so reselecting a photo doesn't re-decode the
   // RAF (brief: "cache decoded previews; don't re-decode on every interaction").
   const previewCache = useRef<Map<string, PreviewPayload>>(new Map());
+
+  // ── Edit-stack persistence — edits (incl. rotation) survive restarts ──
+  // Load once on startup. Saving stays disabled until the load succeeds, so a
+  // failed load can never let a fresh session overwrite the store on disk.
+  const stacksLoaded = useRef(false);
+  useEffect(() => {
+    loadStacks()
+      .then((persisted) => {
+        // Anything edited before the load resolved wins over the disk copy.
+        const merged = { ...persisted, ...stacksRef.current };
+        stacksRef.current = merged;
+        setStacks(merged);
+        stacksLoaded.current = true;
+      })
+      .catch((e) => console.warn("Failed to load edit stacks:", e));
+  }, []);
+
+  // Debounced save on every stack change (last-write-wins, single writer).
+  useEffect(() => {
+    if (!stacksLoaded.current) return;
+    const id = window.setTimeout(() => {
+      saveStacks(stacks).catch((e) => console.warn("Failed to save edit stacks:", e));
+    }, 1000);
+    return () => window.clearTimeout(id);
+  }, [stacks]);
 
   const selected = useMemo(
     () => entries.find((e) => e.id === selectedId) ?? null,
@@ -331,6 +358,30 @@ export function App() {
     [applyEdit]
   );
 
+  // Rotate the selected photo by ±1 clockwise quarter-turn (geometry lives in
+  // the stack like any other adjustment, so it persists, exports, and undoes
+  // with it — routed through applyEdit like every other stack write).
+  const rotate = useCallback(
+    (quarterTurns: 1 | -1) => {
+      applyEdit("rotation", (cur) => ({
+        ...cur,
+        rotation: (cur.rotation + quarterTurns + 4) % 4,
+      }));
+    },
+    [applyEdit]
+  );
+
+  // Keyboard: [ / ] rotate the selected photo (skipped while typing in a field).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!selectedId || isTextInput(e.target)) return;
+      if (e.key === "[") rotate(-1);
+      else if (e.key === "]") rotate(1);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [rotate, selectedId]);
+
   // Replace the whole tone curve (the editor manages add/move/remove).
   const updateCurve = useCallback(
     (curve: CurvePoint[]) => {
@@ -485,6 +536,7 @@ export function App() {
             preview={preview}
             adjustments={showOriginal ? ORIGINAL_ADJUSTMENTS : adjustments}
             loading={previewLoading}
+            onRotate={rotate}
           />
         </section>
 

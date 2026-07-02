@@ -21,6 +21,14 @@ UX + **Phase 4 crop/straighten**, all **needing in-app verification**)
   undoable), custom thumbnail context menu (Reset / Copy-Paste adjustments /
   Rotate / Show in Explorer via `reveal_in_file_manager`), webview default
   menu suppressed. Batch writes funnel through `applyToPhotos`.
+- **Preset favorites + manager (18 built-ins):** the inspector panel lists
+  only ★ favorites (persisted in `<app-data>/preset-favorites.json`,
+  seeded from `default_favorites()`); "Manage presets…" opens a modal with
+  every preset, star toggles, and live benchmark previews — bundled Kodak
+  kodim test images (`public/benchmark/`) rendered through the real
+  `PreviewRenderer`, so examples are the true pipeline output. Presets are
+  geometry-free by construction now (stripped at save; apply preserves the
+  target's geometry).
 On top of the verified `v0.3.0`:
 - **Effects (new, session 6):** four Fuji-style `Adjustments` fields —
   `grain`/`grain_size` (film grain: monochrome midtone-masked luminance noise,
@@ -91,8 +99,10 @@ them** (Vite hot-reload updates only the frontend).
 
 **First: human-verify the whole session-6 batch in the app** (relaunch the
 dev task first — built-ins/commands live in the Rust binary):
-- Presets: 11 built-ins listed; Soft Film reads as a gentle fade (not milky);
-  "Classic Portrait" flatters skin on a real portrait RAF.
+- Presets: 18 built-ins in the manager; the inspector panel shows only the 5
+  default favorites; starring/unstarring persists across restarts; benchmark
+  previews update instantly per preset; Soft Film reads as a gentle fade (not
+  milky); "Classic Portrait" flatters skin on a real portrait RAF.
 - Effects: grain looks like film at Weak/Small vs Strong/Large; color chrome
   deepens saturated reds/blues, greys untouched.
 - Library UX: ✎ badge tracks edits/reset/undo; context-menu actions on a

@@ -84,6 +84,16 @@ export function renamePreset(oldName: string, newName: string): Promise<void> {
   return invoke("rename_preset", { oldName, newName });
 }
 
+/** Load the favorite-preset names (the shipped defaults on first run). */
+export function loadPresetFavorites(): Promise<string[]> {
+  return invoke<string[]>("load_preset_favorites");
+}
+
+/** Persist the favorite-preset names. */
+export function savePresetFavorites(names: string[]): Promise<void> {
+  return invoke("save_preset_favorites", { names });
+}
+
 /** Load the persisted per-image edit stacks (empty map on first run). */
 export function loadStacks(): Promise<Record<string, Adjustments>> {
   return invoke<Record<string, Adjustments>>("load_stacks");

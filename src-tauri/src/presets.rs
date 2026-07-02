@@ -242,7 +242,161 @@ pub fn builtin_presets() -> Vec<Preset> {
                 ..Default::default()
             },
         ),
+        // Kodachrome-style vintage slide: warm, punchy, deep blacks, red-forward.
+        builtin(
+            "Vintage Slide",
+            Adjustments {
+                contrast: 0.25,
+                temperature: 0.1,
+                vibrance: 0.15,
+                saturation: 0.05,
+                blacks: -0.15,
+                hsl: hsl_bands(&[
+                    (0, 0.0, 0.1, 0.0),      // red: the Kodachrome signature
+                    (5, 0.0, -0.2, 0.0),     // blue: restrained
+                ]),
+                color_chrome: 0.5,
+                grain: 0.2,
+                grain_size: 0.3,
+                ..Default::default()
+            },
+        ),
+        // Classic-Neg-style street negative: hard tone, shifted muted greens.
+        builtin(
+            "Street Neg",
+            Adjustments {
+                contrast: 0.25,
+                saturation: -0.15,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.02 },
+                    CurvePoint { x: 1.0, y: 1.0 },
+                ],
+                hsl: hsl_bands(&[
+                    (3, -0.2, -0.15, 0.0),   // green: muted, toward yellow
+                    (4, 0.0, -0.2, 0.0),     // aqua: subdued
+                ]),
+                color_chrome: 0.5,
+                grain: 0.3,
+                grain_size: 0.4,
+                ..Default::default()
+            },
+        ),
+        // Eterna-style flat cinema look: low contrast, muted, soft matte floor.
+        builtin(
+            "Cine Soft",
+            Adjustments {
+                contrast: -0.2,
+                highlights: -0.15,
+                shadows: 0.1,
+                saturation: -0.3,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.04 },
+                    CurvePoint { x: 1.0, y: 0.97 },
+                ],
+                ..Default::default()
+            },
+        ),
+        // Acros-style B&W: rich tone, deep blacks, fine-but-present grain.
+        builtin(
+            "Deep Mono",
+            Adjustments {
+                saturation: -1.0,
+                contrast: 0.2,
+                blacks: -0.15,
+                whites: 0.05,
+                grain: 0.3,
+                grain_size: 0.5,
+                ..Default::default()
+            },
+        ),
+        // Nostalgic-Neg-style album warmth: amber cast, lifted soft shadows.
+        builtin(
+            "Amber Album",
+            Adjustments {
+                temperature: 0.18,
+                highlights: -0.1,
+                shadows: 0.15,
+                saturation: -0.1,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.03 },
+                    CurvePoint { x: 1.0, y: 1.0 },
+                ],
+                hsl: hsl_bands(&[
+                    (1, 0.0, 0.05, 0.08),    // orange: warm, luminous skin
+                ]),
+                grain: 0.2,
+                grain_size: 0.3,
+                ..Default::default()
+            },
+        ),
+        // Pro-Neg-Std-style studio portrait: soft, muted, skin held bright.
+        builtin(
+            "Studio Neg",
+            Adjustments {
+                contrast: -0.05,
+                temperature: 0.05,
+                shadows: 0.1,
+                saturation: -0.2,
+                hsl: hsl_bands(&[
+                    (1, 0.0, 0.0, 0.05),     // orange: gentle skin lift
+                ]),
+                ..Default::default()
+            },
+        ),
+        // Bleach-bypass-style: drained color over hard, silvery contrast.
+        builtin(
+            "Sun Bleach",
+            Adjustments {
+                contrast: 0.3,
+                whites: 0.1,
+                temperature: 0.05,
+                saturation: -0.45,
+                grain: 0.25,
+                grain_size: 0.4,
+                ..Default::default()
+            },
+        ),
     ]
+}
+
+/// The favorites shipped as the panel's starting set (users curate from
+/// there in the preset manager). Names must match built-ins.
+pub fn default_favorites() -> Vec<String> {
+    ["Neutral", "Classic Portrait", "Punchy", "Soft Film", "Mono Contrast"]
+        .map(String::from)
+        .to_vec()
+}
+
+/// On-disk layout of the favorites file (`preset-favorites.json` in app-data).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FavoritesFile {
+    version: u32,
+    names: Vec<String>,
+}
+
+/// Load the favorite-preset names; a missing file yields [`default_favorites`]
+/// (first run). Unknown names are kept — a favorite user preset that fails to
+/// load one session shouldn't silently lose its star.
+pub fn load_favorites(path: &Path) -> anyhow::Result<Vec<String>> {
+    if !path.is_file() {
+        return Ok(default_favorites());
+    }
+    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let file: FavoritesFile =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    Ok(file.names)
+}
+
+/// Persist the favorite-preset names (last-write-wins, single writer).
+pub fn save_favorites(path: &Path, names: &[String]) -> anyhow::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let file = FavoritesFile { version: 1, names: names.to_vec() };
+    fs::write(path, serde_json::to_string_pretty(&file)?)
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
 }
 
 /// True when `name` collides with a built-in (case-insensitive, trimmed).
@@ -523,6 +677,25 @@ mod tests {
         // Slashes and dots are sanitized out of the file name, not rejected.
         save_preset(store.path(), "a/b..c", &adj).unwrap();
         assert!(store.path().join("a_b__c.json").is_file(), "sanitized file name");
+    }
+
+    #[test]
+    fn favorites_default_when_missing_and_round_trip() {
+        let store = TempStore::new("favorites");
+        let path = store.path().join("preset-favorites.json");
+
+        // Missing file → the shipped defaults, and every default is a built-in.
+        let defaults = load_favorites(&path).unwrap();
+        assert_eq!(defaults, default_favorites());
+        let builtins: Vec<String> = builtin_presets().into_iter().map(|p| p.name).collect();
+        for name in &defaults {
+            assert!(builtins.contains(name), "default favorite {name} isn't a built-in");
+        }
+
+        // Round trip, including a user-preset name that doesn't exist (kept).
+        let mine = vec!["Neutral".to_string(), "My Look".to_string()];
+        save_favorites(&path, &mine).unwrap();
+        assert_eq!(load_favorites(&path).unwrap(), mine);
     }
 
     #[test]

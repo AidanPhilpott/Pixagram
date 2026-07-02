@@ -88,6 +88,34 @@ drag feel, straighten direction on a real horizon, preset-keeps-crop).
 
 ---
 
+## 2026-07-02 (session 6, continued) — preset favorites + manager modal + 18 built-ins
+
+The flat preset list didn't scale, so preset browsing split into two tiers:
+
+- **Inspector panel = favorites only.** Favorite names persist in
+  `<app-data>/preset-favorites.json` (`load/save_preset_favorites` commands;
+  missing file → `default_favorites()`, 5 starter built-ins). Delete/rename
+  keep the favorites list in sync.
+- **Preset manager modal** ("Manage presets…"): every preset with ★ toggles,
+  and — the core of it — **live benchmark previews**: three bundled Kodak
+  test-suite images (kodim15 portrait / kodim19 lighthouse / kodim23 parrots,
+  released by Kodak for unrestricted use; `public/benchmark/` + README)
+  rendered through the real `PreviewRenderer`, so a preset example IS the
+  shared pipeline's output — selecting a preset is a GPU-only uniform update.
+  Apply button hits the current selection.
+- **7 more built-ins (18 total):** Vintage Slide (Kodachrome-ish), Street Neg
+  (Classic-Neg-ish), Cine Soft (Eterna-ish), Deep Mono (Acros-ish), Amber
+  Album (Nostalgic-Neg-ish), Studio Neg (Pro-Neg-Std-ish), Sun Bleach
+  (bleach bypass). All pass the whites-floor test.
+- **Save-preset now strips geometry** (a preset is a LOOK): saving from a
+  rotated/cropped photo no longer bakes that geometry into the preset; the
+  modal also neutralizes geometry when previewing older saved presets.
+
+55 Rust tests + `npm run build` pass. Pending in-app verification with the
+rest of session 6.
+
+---
+
 ## 2026-07-02 (session 5, wrap-up) — app-verified, tagged v0.3.0
 
 **Human verification passed.** The user ran the app with Fuji RAFs and Sony

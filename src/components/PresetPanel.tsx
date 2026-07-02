@@ -3,6 +3,8 @@ import type { Preset } from "../lib/ipc";
 
 interface PresetPanelProps {
   presets: Preset[];
+  /** Names of favorited presets — the ONLY ones this panel lists. */
+  favorites: ReadonlySet<string>;
   /** No photo selected — applying and saving make no sense. */
   disabled: boolean;
   /** How many photos an apply currently targets (grid multi-select). */
@@ -12,21 +14,26 @@ interface PresetPanelProps {
   onSaveCurrent: (name: string) => Promise<boolean>;
   onDelete: (name: string) => void;
   onRename: (oldName: string, newName: string) => Promise<boolean>;
+  /** Open the preset manager (all presets + favorites + benchmark previews). */
+  onOpenManager: () => void;
 }
 
 /**
- * The preset library (Phase 3): built-ins + user presets; click a preset to
- * apply it to every selected photo. A preset is just a named `Adjustments`
- * bundle (model A), so saving/renaming is inline naming — no native prompts.
+ * The quick-access preset shelf: shows only FAVORITES (curated in the preset
+ * manager — see `PresetManagerModal`), so the panel stays short as the library
+ * grows. Click a preset to apply it to every selected photo. A preset is just
+ * a named `Adjustments` bundle (model A), so saving/renaming is inline naming.
  */
 export function PresetPanel({
   presets,
+  favorites,
   disabled,
   applyCount,
   onApply,
   onSaveCurrent,
   onDelete,
   onRename,
+  onOpenManager,
 }: PresetPanelProps) {
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
@@ -66,7 +73,12 @@ export function PresetPanel({
       )}
 
       <div className="presets__list">
-        {presets.map((p) =>
+        {presets.filter((p) => favorites.has(p.name)).length === 0 && (
+          <p className="presets__empty">
+            No favorite presets — star some in Manage presets below.
+          </p>
+        )}
+        {presets.filter((p) => favorites.has(p.name)).map((p) =>
           renaming === p.name ? (
             <div className="preset-row" key={p.name}>
               <input
@@ -146,6 +158,9 @@ export function PresetPanel({
           Save current as preset…
         </button>
       )}
+      <button className="btn presets__save-btn" onClick={onOpenManager}>
+        Manage presets…
+      </button>
     </div>
   );
 }

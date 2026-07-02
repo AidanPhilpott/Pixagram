@@ -13,6 +13,7 @@ import { CollapsibleSection } from "./components/CollapsibleSection";
 import { HslPanel } from "./components/HslPanel";
 import { CurveEditor } from "./components/CurveEditor";
 import { PresetPanel } from "./components/PresetPanel";
+import { PresetManagerModal } from "./components/PresetManagerModal";
 import { ContextMenu, type ContextMenuItem } from "./components/ContextMenu";
 import {
   decodePreview,
@@ -20,11 +21,13 @@ import {
   exportStub,
   listImages,
   listPresets,
+  loadPresetFavorites,
   loadStacks,
   pickRawFiles,
   renamePreset,
   revealInFileManager,
   savePreset,
+  savePresetFavorites,
   saveStacks,
   type ImageEntry,
   type Preset,
@@ -639,12 +642,44 @@ export function App() {
     ];
   }, [menu, editedIds, copiedAdjustments, resetPhotos, copyAdjustments, pasteAdjustments, applyToPhotos]);
 
+  // ── Preset favorites — the inspector panel lists ONLY these; the manager
+  // modal curates them. Persisted as names in <app-data>/preset-favorites.json.
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [managerOpen, setManagerOpen] = useState(false);
+
+  useEffect(() => {
+    loadPresetFavorites()
+      .then((names) => setFavorites(new Set(names)))
+      .catch((e) => console.warn("Failed to load preset favorites:", e));
+  }, []);
+
+  /** Replace the favorites set and persist it (fire-and-forget, status on error). */
+  const writeFavorites = useCallback((next: Set<string>) => {
+    setFavorites(next);
+    savePresetFavorites([...next]).catch((e) =>
+      setStatus(`Saving favorites failed: ${e instanceof Error ? e.message : String(e)}`)
+    );
+  }, []);
+
+  const toggleFavorite = useCallback(
+    (name: string) => {
+      const next = new Set(favorites);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      writeFavorites(next);
+    },
+    [favorites, writeFavorites]
+  );
+
   // Save/delete/rename report success back to the panel (so its inline name
   // inputs know whether to close) and surface errors in the status line.
   const handleSavePreset = useCallback(
     async (name: string) => {
       try {
-        await savePreset(name, adjustments);
+        // A preset is a LOOK — strip the photo's per-shot geometry so the
+        // saved bundle is neutral (apply-side also preserves the target's
+        // geometry, and the manager's benchmark previews render unrotated).
+        await savePreset(name, withGeometryOf(defaultAdjustments(), adjustments));
         await refreshPresets();
         setStatus(`Saved preset "${name}"`);
         return true;
@@ -661,11 +696,16 @@ export function App() {
       try {
         await deletePreset(name);
         await refreshPresets();
+        if (favorites.has(name)) {
+          const next = new Set(favorites);
+          next.delete(name);
+          writeFavorites(next);
+        }
       } catch (e) {
         setStatus(`Delete preset failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
-    [refreshPresets]
+    [refreshPresets, favorites, writeFavorites]
   );
 
   const handleRenamePreset = useCallback(
@@ -673,13 +713,19 @@ export function App() {
       try {
         await renamePreset(oldName, newName);
         await refreshPresets();
+        if (favorites.has(oldName)) {
+          const next = new Set(favorites);
+          next.delete(oldName);
+          next.add(newName.trim());
+          writeFavorites(next);
+        }
         return true;
       } catch (e) {
         setStatus(`Rename preset failed: ${e instanceof Error ? e.message : String(e)}`);
         return false;
       }
     },
-    [refreshPresets]
+    [refreshPresets, favorites, writeFavorites]
   );
 
   return (
@@ -787,12 +833,14 @@ export function App() {
           <CollapsibleSection id="presets" title="Presets">
             <PresetPanel
               presets={presets}
+              favorites={favorites}
               disabled={!selected || showOriginal}
               applyCount={selectedIds.size}
               onApply={applyPreset}
               onSaveCurrent={handleSavePreset}
               onDelete={handleDeletePreset}
               onRename={handleRenamePreset}
+              onOpenManager={() => setManagerOpen(true)}
             />
           </CollapsibleSection>
           {status && <div className="inspector__status">{status}</div>}
@@ -801,6 +849,18 @@ export function App() {
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />
+      )}
+
+      {managerOpen && (
+        <PresetManagerModal
+          presets={presets}
+          favorites={favorites}
+          onToggleFavorite={toggleFavorite}
+          onApply={applyPreset}
+          applyCount={selectedIds.size}
+          canApply={!!selected && !showOriginal}
+          onClose={() => setManagerOpen(false)}
+        />
       )}
     </div>
   );

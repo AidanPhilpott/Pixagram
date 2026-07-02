@@ -170,6 +170,26 @@ fn rename_preset(
     presets::rename_preset(&presets_dir(&app)?, &old_name, &new_name).map_err(|e| e.to_string())
 }
 
+/// Where the preset-favorites list lives: `<app data dir>/preset-favorites.json`.
+fn favorites_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("preset-favorites.json"))
+        .map_err(|e| e.to_string())
+}
+
+/// Load the favorite-preset names (the shipped defaults on first run).
+#[tauri::command]
+fn load_preset_favorites(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    presets::load_favorites(&favorites_path(&app)?).map_err(|e| e.to_string())
+}
+
+/// Persist the favorite-preset names.
+#[tauri::command]
+fn save_preset_favorites(app: tauri::AppHandle, names: Vec<String>) -> Result<(), String> {
+    presets::save_favorites(&favorites_path(&app)?, &names).map_err(|e| e.to_string())
+}
+
 /// Where the edit-stack store lives: `<app data dir>/edit-stacks.json`. The
 /// store functions themselves take the path (keeps them unit-testable).
 fn stacks_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -204,6 +224,8 @@ pub fn run() {
             save_preset,
             delete_preset,
             rename_preset,
+            load_preset_favorites,
+            save_preset_favorites,
             save_stacks,
             load_stacks
         ])

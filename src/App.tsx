@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ThumbnailGrid } from "./components/ThumbnailGrid";
 import { Preview } from "./components/Preview";
 import { AdjustmentSlider } from "./components/AdjustmentSlider";
@@ -26,6 +26,29 @@ import {
 
 /** Compact readout shared by all unit-less [-1,1] sliders (shown as [-100,+100]). */
 const asPercent = (v: number) => `${v > 0 ? "+" : ""}${Math.round(v * 100)}`;
+
+/** Per-photo undo/redo snapshots (whole `Adjustments` values, newest last). */
+type History = { past: Adjustments[]; future: Adjustments[] };
+const HISTORY_CAP = 100;
+/**
+ * Edits with the same key landing within this window merge into the previous
+ * undo step — a slider/curve/HSL drag is a stream of change events, and must
+ * undo as ONE step, not hundreds.
+ */
+const COALESCE_MS = 400;
+
+/** True when the keyboard focus is somewhere text is being typed. */
+const isTextInput = (t: EventTarget | null) => {
+  const el = t as HTMLElement | null;
+  if (!el) return false;
+  if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
+  return (
+    el.tagName === "INPUT" &&
+    !["range", "checkbox", "radio", "button", "submit"].includes(
+      (el as HTMLInputElement).type
+    )
+  );
+};
 
 /** The scalar (single-number) fields of `Adjustments` — i.e. everything but `hsl`. */
 type ScalarField = {
@@ -59,6 +82,14 @@ export function App() {
 
   // Non-destructive adjustment stack per photo, keyed by id (= path).
   const [stacks, setStacks] = useState<Record<string, Adjustments>>({});
+  // Synchronous mirror of `stacks` so event handlers can read the pre-edit value
+  // without waiting for a re-render (all writes go through applyEdit/timeTravel).
+  const stacksRef = useRef(stacks);
+  // Undo/redo history per photo. Refs, not state — history changes never need a
+  // re-render of their own, and mutating refs in handlers is StrictMode-safe.
+  const historyRef = useRef<Record<string, History>>({});
+  // Identity of the last edit, for drag coalescing (see applyEdit).
+  const lastEditRef = useRef<{ id: string; key: string; time: number } | null>(null);
 
   const [importing, setImporting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -118,42 +149,92 @@ export function App() {
     }
   }, []);
 
+  // Single choke point for every stack write. Pushes an undo snapshot unless
+  // the edit continues the previous one (same photo + same key, within
+  // COALESCE_MS) — so a whole drag collapses into one undo step while live
+  // state still updates per event. Any future stack replacement (preset apply,
+  // reset-all) routed through here is a single undoable step for free.
+  const applyEdit = useCallback(
+    (key: string, edit: (current: Adjustments) => Adjustments) => {
+      if (!selectedId) return;
+      const current = stacksRef.current[selectedId] ?? defaultAdjustments();
+      const now = Date.now();
+      const last = lastEditRef.current;
+      const coalesce =
+        last && last.id === selectedId && last.key === key && now - last.time < COALESCE_MS;
+      if (!coalesce) {
+        const h = (historyRef.current[selectedId] ??= { past: [], future: [] });
+        h.past.push(current);
+        if (h.past.length > HISTORY_CAP) h.past.shift();
+        h.future = []; // a fresh edit invalidates the redo branch
+      }
+      lastEditRef.current = { id: selectedId, key, time: now };
+      const next = { ...stacksRef.current, [selectedId]: edit(current) };
+      stacksRef.current = next;
+      setStacks(next);
+    },
+    [selectedId]
+  );
+
+  // Step the selected photo's stack backward/forward through its history.
+  const timeTravel = useCallback(
+    (direction: "undo" | "redo") => {
+      if (!selectedId) return;
+      const h = historyRef.current[selectedId];
+      const source = direction === "undo" ? h?.past : h?.future;
+      if (!h || !source || source.length === 0) return;
+      const current = stacksRef.current[selectedId] ?? defaultAdjustments();
+      const target = source.pop()!;
+      (direction === "undo" ? h.future : h.past).push(current);
+      lastEditRef.current = null; // the next edit starts a fresh undo step
+      const next = { ...stacksRef.current, [selectedId]: target };
+      stacksRef.current = next;
+      setStacks(next);
+    },
+    [selectedId]
+  );
+
+  // Global undo/redo shortcuts: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z (Cmd on macOS).
+  // Skipped while typing so the browser's native text undo is never stolen.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "z" && k !== "y") return;
+      if (isTextInput(e.target)) return;
+      e.preventDefault();
+      timeTravel(k === "y" || e.shiftKey ? "redo" : "undo");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [timeTravel]);
+
   // Update a single field of the selected photo's stack. One handler scales to
   // every Phase 2 adjustment instead of a bespoke setter per slider.
   const updateField = useCallback(
     <K extends keyof Adjustments>(field: K, value: Adjustments[K]) => {
-      if (!selectedId) return;
-      setStacks((prev) => ({
-        ...prev,
-        [selectedId]: { ...(prev[selectedId] ?? defaultAdjustments()), [field]: value },
-      }));
+      applyEdit(String(field), (cur) => ({ ...cur, [field]: value }));
     },
-    [selectedId]
+    [applyEdit]
   );
 
   // Update one field of one HSL band, leaving the other 7 bands untouched.
   const updateHslBand = useCallback(
     (index: number, field: keyof HslBand, value: number) => {
-      if (!selectedId) return;
-      setStacks((prev) => {
-        const current = prev[selectedId] ?? defaultAdjustments();
-        const hsl = current.hsl.map((b, i) => (i === index ? { ...b, [field]: value } : b));
-        return { ...prev, [selectedId]: { ...current, hsl } };
-      });
+      applyEdit(`hsl.${index}.${field}`, (cur) => ({
+        ...cur,
+        hsl: cur.hsl.map((b, i) => (i === index ? { ...b, [field]: value } : b)),
+      }));
     },
-    [selectedId]
+    [applyEdit]
   );
 
   // Replace the whole tone curve (the editor manages add/move/remove).
   const updateCurve = useCallback(
     (curve: CurvePoint[]) => {
-      if (!selectedId) return;
-      setStacks((prev) => ({
-        ...prev,
-        [selectedId]: { ...(prev[selectedId] ?? defaultAdjustments()), curve },
-      }));
+      applyEdit("curve", (cur) => ({ ...cur, curve }));
     },
-    [selectedId]
+    [applyEdit]
   );
 
   const handleExport = useCallback(async () => {

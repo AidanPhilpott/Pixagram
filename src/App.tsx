@@ -37,6 +37,12 @@ const HISTORY_CAP = 100;
  */
 const COALESCE_MS = 400;
 
+/**
+ * The neutral stack shown by the before/after toggle. A stable module constant
+ * so `<Preview>` doesn't see a new object identity every render. Never mutated.
+ */
+const ORIGINAL_ADJUSTMENTS = defaultAdjustments();
+
 /** True when the keyboard focus is somewhere text is being typed. */
 const isTextInput = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
@@ -94,6 +100,12 @@ export function App() {
   const [importing, setImporting] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
+  // Before/after: momentary while "\" is held (Lightroom convention), or
+  // latched via the inspector toggle. Never touches the stored stack — the
+  // preview is just handed the neutral adjustments instead.
+  const [holdOriginal, setHoldOriginal] = useState(false);
+  const [pinOriginal, setPinOriginal] = useState(false);
+
   // Cache developed previews by id so reselecting a photo doesn't re-decode the
   // RAF (brief: "cache decoded previews; don't re-decode on every interaction").
   const previewCache = useRef<Map<string, PreviewPayload>>(new Map());
@@ -105,6 +117,7 @@ export function App() {
   const adjustments = selectedId
     ? stacks[selectedId] ?? defaultAdjustments()
     : defaultAdjustments();
+  const showOriginal = (holdOriginal || pinOriginal) && !!selected;
 
   const handleImport = useCallback(async () => {
     try {
@@ -209,6 +222,24 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [timeTravel]);
 
+  // Hold "\" for a momentary original view; release to return to the edit.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "\\" || e.repeat || isTextInput(e.target)) return;
+      e.preventDefault();
+      setHoldOriginal(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "\\") setHoldOriginal(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
   // Update a single field of the selected photo's stack. One handler scales to
   // every Phase 2 adjustment instead of a bespoke setter per slider.
   const updateField = useCallback(
@@ -278,13 +309,30 @@ export function App() {
         </aside>
 
         <section className="stage">
-          <Preview preview={preview} adjustments={adjustments} loading={previewLoading} />
+          {showOriginal && <div className="stage__badge">Original</div>}
+          <Preview
+            preview={preview}
+            adjustments={showOriginal ? ORIGINAL_ADJUSTMENTS : adjustments}
+            loading={previewLoading}
+          />
         </section>
 
         <aside className="inspector">
-          <h2 className="inspector__title">
-            {selected ? selected.fileName : "Adjustments"}
-          </h2>
+          <div className="inspector__head">
+            <h2 className="inspector__title">
+              {selected ? selected.fileName : "Adjustments"}
+            </h2>
+            <button
+              type="button"
+              className={`original-toggle${pinOriginal ? " original-toggle--on" : ""}`}
+              onClick={() => setPinOriginal((v) => !v)}
+              disabled={!selected}
+              aria-pressed={pinOriginal}
+              title={"Show the unedited original (hold \\ for a quick peek)"}
+            >
+              Original
+            </button>
+          </div>
           {SLIDERS.map((s) => (
             <AdjustmentSlider
               key={s.field}
@@ -295,13 +343,21 @@ export function App() {
               max={s.range.max}
               step={s.range.step}
               defaultValue={0}
-              disabled={!selected}
+              disabled={!selected || showOriginal}
               onChange={(v) => updateField(s.field, v)}
               format={s.format}
             />
           ))}
-          <CurveEditor points={adjustments.curve} disabled={!selected} onChange={updateCurve} />
-          <HslPanel bands={adjustments.hsl} disabled={!selected} onChange={updateHslBand} />
+          <CurveEditor
+            points={adjustments.curve}
+            disabled={!selected || showOriginal}
+            onChange={updateCurve}
+          />
+          <HslPanel
+            bands={adjustments.hsl}
+            disabled={!selected || showOriginal}
+            onChange={updateHslBand}
+          />
           {status && <div className="inspector__status">{status}</div>}
         </aside>
       </main>

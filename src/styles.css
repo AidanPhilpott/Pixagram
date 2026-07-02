@@ -219,12 +219,31 @@ body {
 
 /* ── Preview stage ───────────────────────────────────── */
 .stage {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: 0;
   min-height: 0;
   padding: 24px;
+}
+/* "Original" badge while the before/after view is active. */
+.stage__badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(14, 15, 17, 0.75);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
 }
 .preview {
   position: relative;
@@ -256,14 +275,52 @@ body {
 }
 
 /* ── Inspector ───────────────────────────────────────── */
+.inspector__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
 .inspector__title {
   font-size: 13px;
   font-weight: 600;
-  margin: 0 0 16px;
+  margin: 0;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Before/after latch — quiet pill that lights up while showing the original. */
+.original-toggle {
+  appearance: none;
+  border: 1px solid var(--border-strong);
+  background: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.original-toggle:hover:not(:disabled) {
+  color: var(--text);
+  border-color: #3f454d;
+}
+.original-toggle--on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.original-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .control {

@@ -7,6 +7,41 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-07-01 (session 5, worktree agent) — Phase 3: presets (save/apply/manage)
+
+Phase 3 core built as decided (model **A**: a preset = a named, editable
+`Adjustments` JSON bundle — no second color stage, no new color math).
+
+- **Rust store** (`src-tauri/src/presets.rs`): one pretty-printed JSON file per
+  user preset (`{version, name, adjustments}`) under `<app-data>/presets/`
+  (Tauri path resolver; `com.pixagram.app`). Store functions take the directory
+  explicitly, so the 7 new unit tests run against a temp dir and never touch
+  real app data. Names are validated (non-empty, ≤64 chars, can't shadow a
+  built-in) and sanitized into file names (no traversal). Unreadable preset
+  files are skipped with a warning, not fatal. `#[serde(default)]` on
+  `Adjustments` means old preset JSON keeps loading as the struct grows
+  (covered by a test).
+- **Built-ins in code**: Neutral, Punchy, Soft Film, Mono Contrast — flagged
+  `builtin: true`, not deletable/renamable/shadowable, always listed first.
+- **Commands** in `lib.rs`: `list_presets` / `save_preset` / `delete_preset` /
+  `rename_preset`. The `Preset` TS type is ts-rs-generated like the adjustment
+  types (`src/adjustments/generated/Preset.ts`).
+- **UI** (`src/components/PresetPanel.tsx`, bottom of the inspector): preset
+  list (built-in tag on shipped ones), click to apply, "Save current as
+  preset…" with an inline name input (no native prompts), inline rename +
+  delete for user presets. Errors surface in the existing status line.
+- **Batch apply**: the grid now supports Ctrl/Cmd-click (toggle) and
+  Shift-click (range from the primary) multi-select — `selectedIds:
+  Set<string>` alongside the primary `selectedId` that drives the preview.
+  Applying a preset replaces the stack of every selected photo (plain state
+  set, deep-cloned per photo so stacks never alias).
+
+**Verified:** `cargo test --lib` (18 math + 7 preset + 4 binding tests);
+`npm run build` clean. Not app-eyeballed (worktree sandbox can't launch the
+app) — needs a human run-through before tagging `v0.3.0`.
+
+---
+
 ## 2026-06-29 (session 4g) — Phase 2 hardening + tag v0.2.0
 
 Phase 2 (full adjustment pipeline) is **complete**. Both hardening items landed and

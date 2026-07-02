@@ -2,6 +2,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Adjustments } from "../adjustments/definition";
+import type { Preset } from "../adjustments/generated/Preset";
+
+/** ts-rs mirror of the Rust `Preset` struct (a named `Adjustments` bundle). */
+export type { Preset };
 
 /** Mirror of the Rust `ImageEntry` struct. */
 export interface ImageEntry {
@@ -44,4 +48,24 @@ export function decodePreview(path: string): Promise<PreviewPayload> {
 /** Run the Phase 1 export stub for one photo with its adjustment stack. */
 export function exportStub(path: string, adjustments: Adjustments): Promise<string> {
   return invoke<string>("export_stub", { path, adjustments });
+}
+
+/** List built-in + user presets (built-ins first). */
+export function listPresets(): Promise<Preset[]> {
+  return invoke<Preset[]>("list_presets");
+}
+
+/** Save (or overwrite) a user preset holding the given adjustment stack. */
+export function savePreset(name: string, adjustments: Adjustments): Promise<void> {
+  return invoke("save_preset", { name, adjustments });
+}
+
+/** Delete a user preset by name (built-ins are refused by the Rust side). */
+export function deletePreset(name: string): Promise<void> {
+  return invoke("delete_preset", { name });
+}
+
+/** Rename a user preset (built-ins are refused by the Rust side). */
+export function renamePreset(oldName: string, newName: string): Promise<void> {
+  return invoke("rename_preset", { oldName, newName });
 }

@@ -74,6 +74,23 @@ in [../CLAUDE.md](../CLAUDE.md).)
   for the file picker; window label defaults to `main`.
 - CSP is set (not `null`) and must allow `img-src … data: blob:` because previews
   and thumbnails travel as base64 `data:` URLs.
+- **`app.path().app_data_dir()` needs `use tauri::Manager;`** — the path resolver
+  hangs off the `Manager` trait, and the compiler error ("method not found on
+  `AppHandle`") doesn't hint at the missing import. Keep path resolution in the
+  thin command wrappers (`lib.rs`) and make the store functions take a `&Path`
+  so unit tests can inject a temp dir instead of touching real app data.
+
+## Presets (Phase 3)
+
+- **User preset names are validated against the built-ins case-insensitively**
+  (can't shadow "Neutral"/"Punchy"/…), and sanitized into file names (anything
+  non-alphanumeric except `- _ space` becomes `_`), which also forecloses path
+  traversal via the name. The JSON `name` field is the display name; the file
+  name is only a derivative — a rename that maps to the same file just rewrites
+  in place.
+- **`list_presets` skips unreadable preset JSON with a `log::warn`** instead of
+  failing the whole panel — one hand-edited broken file must not hide the rest
+  of the library.
 
 ## Color / preview
 

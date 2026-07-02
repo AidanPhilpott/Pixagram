@@ -1,16 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+} from "react";
 import { ThumbnailGrid } from "./components/ThumbnailGrid";
 import { Preview } from "./components/Preview";
 import { AdjustmentSlider } from "./components/AdjustmentSlider";
 import { CollapsibleSection } from "./components/CollapsibleSection";
 import { HslPanel } from "./components/HslPanel";
 import { CurveEditor } from "./components/CurveEditor";
+import { PresetPanel } from "./components/PresetPanel";
 import {
   decodePreview,
+  deletePreset,
   exportStub,
   listImages,
+  listPresets,
   pickRafFiles,
+  renamePreset,
+  savePreset,
   type ImageEntry,
+  type Preset,
   type PreviewPayload,
 } from "./lib/ipc";
 import {
@@ -83,9 +96,21 @@ const SLIDERS: ReadonlyArray<{
   { field: "saturation", label: "Saturation", group: "color", range: COLOR_RANGE, format: asPercent },
 ];
 
+/** Deep-copy a stack so an applied preset never aliases its arrays into a photo. */
+function cloneAdjustments(a: Adjustments): Adjustments {
+  return {
+    ...a,
+    hsl: a.hsl.map((b) => ({ ...b })),
+    curve: a.curve.map((p) => ({ ...p })),
+  };
+}
+
 export function App() {
   const [entries, setEntries] = useState<ImageEntry[]>([]);
+  // Primary selection (drives the preview + inspector) plus the full
+  // multi-selection (Ctrl/Shift-click) that batch operations target.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -141,10 +166,8 @@ export function App() {
     }
   }, []);
 
-  const handleSelect = useCallback(async (entry: ImageEntry) => {
-    setSelectedId(entry.id);
-    setStatus(null);
-
+  // Decode (or fetch from cache) the preview of the primary selection.
+  const loadPreview = useCallback(async (entry: ImageEntry) => {
     const cached = previewCache.current.get(entry.id);
     if (cached) {
       setPreview(cached);
@@ -164,6 +187,51 @@ export function App() {
       setPreviewLoading(false);
     }
   }, []);
+
+  // Grid click: plain = single select, Ctrl/Cmd = toggle membership, Shift =
+  // range from the current primary. The primary drives the preview/inspector;
+  // batch operations (preset apply) hit every selected id.
+  const handleSelect = useCallback(
+    async (entry: ImageEntry, e: MouseEvent) => {
+      const additive = e.ctrlKey || e.metaKey;
+      let next: Set<string>;
+      let primary: string | null = entry.id;
+
+      if (e.shiftKey && selectedId) {
+        const ids = entries.map(({ id }) => id);
+        const [a, b] = [ids.indexOf(selectedId), ids.indexOf(entry.id)].sort(
+          (x, y) => x - y
+        );
+        const range = ids.slice(a, b + 1);
+        next = additive ? new Set([...selectedIds, ...range]) : new Set(range);
+      } else if (additive) {
+        next = new Set(selectedIds);
+        if (next.has(entry.id)) {
+          // Toggled the clicked photo out; fall back to the last one still in.
+          next.delete(entry.id);
+          const rest = entries.filter(({ id }) => next.has(id));
+          primary = rest.length > 0 ? rest[rest.length - 1].id : null;
+        } else {
+          next.add(entry.id);
+        }
+      } else {
+        next = new Set([entry.id]);
+      }
+
+      setSelectedIds(next);
+      setSelectedId(primary);
+      setStatus(null);
+
+      const target = entries.find(({ id }) => id === primary);
+      if (!target) {
+        setPreview(null);
+        setPreviewLoading(false);
+        return;
+      }
+      await loadPreview(target);
+    },
+    [entries, selectedId, selectedIds, loadPreview]
+  );
 
   // Single choke point for every stack write. Pushes an undo snapshot unless
   // the edit continues the previous one (same photo + same key, within
@@ -298,6 +366,88 @@ export function App() {
     />
   );
 
+  // ── Presets (Phase 3) — named `Adjustments` bundles from the Rust store ──
+  const [presets, setPresets] = useState<Preset[]>([]);
+
+  const refreshPresets = useCallback(async () => {
+    try {
+      setPresets(await listPresets());
+    } catch (e) {
+      setStatus(`Presets failed to load: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshPresets();
+  }, [refreshPresets]);
+
+  // Replace the stack of every selected photo with the preset's adjustments.
+  // Each photo gets its own undo snapshot, so an apply is one Ctrl+Z away —
+  // batch writes can't go through applyEdit (it's single-photo), so this
+  // pushes history itself.
+  const applyPreset = useCallback(
+    (preset: Preset) => {
+      if (selectedIds.size === 0) return;
+      const next = { ...stacksRef.current };
+      for (const id of selectedIds) {
+        const h = (historyRef.current[id] ??= { past: [], future: [] });
+        h.past.push(next[id] ?? defaultAdjustments());
+        if (h.past.length > HISTORY_CAP) h.past.shift();
+        h.future = [];
+        next[id] = cloneAdjustments(preset.adjustments);
+      }
+      lastEditRef.current = null; // the next edit starts a fresh undo step
+      stacksRef.current = next;
+      setStacks(next);
+      const n = selectedIds.size;
+      setStatus(`Applied "${preset.name}" to ${n} photo${n === 1 ? "" : "s"}`);
+    },
+    [selectedIds]
+  );
+
+  // Save/delete/rename report success back to the panel (so its inline name
+  // inputs know whether to close) and surface errors in the status line.
+  const handleSavePreset = useCallback(
+    async (name: string) => {
+      try {
+        await savePreset(name, adjustments);
+        await refreshPresets();
+        setStatus(`Saved preset "${name}"`);
+        return true;
+      } catch (e) {
+        setStatus(`Save preset failed: ${e instanceof Error ? e.message : String(e)}`);
+        return false;
+      }
+    },
+    [adjustments, refreshPresets]
+  );
+
+  const handleDeletePreset = useCallback(
+    async (name: string) => {
+      try {
+        await deletePreset(name);
+        await refreshPresets();
+      } catch (e) {
+        setStatus(`Delete preset failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+    [refreshPresets]
+  );
+
+  const handleRenamePreset = useCallback(
+    async (oldName: string, newName: string) => {
+      try {
+        await renamePreset(oldName, newName);
+        await refreshPresets();
+        return true;
+      } catch (e) {
+        setStatus(`Rename preset failed: ${e instanceof Error ? e.message : String(e)}`);
+        return false;
+      }
+    },
+    [refreshPresets]
+  );
+
   return (
     <div className="app">
       <header className="topbar">
@@ -323,7 +473,8 @@ export function App() {
         <aside className="sidebar">
           <ThumbnailGrid
             entries={entries}
-            selectedId={selectedId}
+            primaryId={selectedId}
+            selectedIds={selectedIds}
             onSelect={handleSelect}
           />
         </aside>
@@ -371,6 +522,17 @@ export function App() {
               bands={adjustments.hsl}
               disabled={!selected || showOriginal}
               onChange={updateHslBand}
+            />
+          </CollapsibleSection>
+          <CollapsibleSection id="presets" title="Presets">
+            <PresetPanel
+              presets={presets}
+              disabled={!selected || showOriginal}
+              applyCount={selectedIds.size}
+              onApply={applyPreset}
+              onSaveCurrent={handleSavePreset}
+              onDelete={handleDeletePreset}
+              onRename={handleRenamePreset}
             />
           </CollapsibleSection>
           {status && <div className="inspector__status">{status}</div>}

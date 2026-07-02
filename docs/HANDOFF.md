@@ -262,3 +262,12 @@ sliders. Concretely, the first moves:
   Easy add in Phase 2 via Tauri's file-drop event.
 - **Preview is 8-bit** — see INSIGHTS; move to 16-bit/float before stacking tone
   ops in Phase 2.
+
+---
+
+> **Worktree-session note (2026-07-01, Phase 3 presets):** the preset store
+> (`src-tauri/src/presets.rs` + 4 Tauri commands), 4 built-ins, the
+> `PresetPanel` UI, and Ctrl/Shift grid multi-select with batch apply landed on
+> this branch. See PROGRESS 2026-07-01 for details. Verified by `cargo test`
+> and `npm run build` only — **needs a human app run-through before tagging
+> `v0.3.0`**. The consolidating session should rewrite the snapshot above.

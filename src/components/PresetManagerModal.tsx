@@ -99,6 +99,8 @@ interface PresetManagerModalProps {
   currentPreview: PreviewPayload | null;
   /** The selected photo's file name (labels the "Your photo" tile). */
   currentLabel: string | null;
+  /** Delete a user preset (built-ins are refused Rust-side). */
+  onDelete: (name: string) => void;
   onClose: () => void;
 }
 
@@ -116,11 +118,18 @@ export function PresetManagerModal({
   canApply,
   currentPreview,
   currentLabel,
+  onDelete,
   onClose,
 }: PresetManagerModalProps) {
   const [selectedName, setSelectedName] = useState<string | null>(
     presets.length > 0 ? presets[0].name : null
   );
+  // Keep a valid selection when the previewed preset gets deleted.
+  useEffect(() => {
+    if (selectedName && !presets.some((p) => p.name === selectedName)) {
+      setSelectedName(presets.length > 0 ? presets[0].name : null);
+    }
+  }, [presets, selectedName]);
   // Preview source: the benchmark examples, or the currently selected photo.
   const [source, setSource] = useState<"examples" | "photo">("examples");
   const selected = presets.find((p) => p.name === selectedName) ?? null;
@@ -207,6 +216,15 @@ export function PresetManagerModal({
                   {p.name}
                   {p.builtin && <span className="preset-row__tag">built-in</span>}
                 </button>
+                {!p.builtin && (
+                  <button
+                    className="preset-manager__delete"
+                    title={`Delete "${p.name}"`}
+                    onClick={() => onDelete(p.name)}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))}
           </div>

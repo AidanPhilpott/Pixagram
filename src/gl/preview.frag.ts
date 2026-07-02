@@ -51,7 +51,7 @@ const float HSL_LUM_STRENGTH = 0.5;
 const float CC_LUM_STRENGTH = 0.12;
 const float CC_SAT_STRENGTH = 0.10;
 // Full-scale grain luminance amplitude — MUST match GRAIN_STRENGTH in adjustments.rs.
-const float GRAIN_STRENGTH = 0.15;
+const float GRAIN_STRENGTH = 0.08;
 
 // Per-channel sRGB <-> linear, matching the Rust implementation exactly.
 float srgbToLinear(float c) {
@@ -228,12 +228,20 @@ void main() {
   }
 
   // Film grain — spatial, on top of the final color. Mirror of Rust
-  // apply_grain(): quantize image coords to grain cells, hash the cell,
-  // luminance-only noise faded at pure black/white.
+  // apply_grain(): SMOOTH value noise (bilinearly blended cell hashes with
+  // Hermite easing) so grain is soft round clumps, not hard squares;
+  // luminance-only, faded at pure black/white.
   if (uGrain > 0.0) {
-    float cell = 1.0 + 2.0 * clamp(uGrainSize, 0.0, 1.0);
-    vec2 c = floor(vUv * uTexSize / cell);
-    float n = hashCell(c) * 2.0 - 1.0;
+    float cell = 1.5 + 2.0 * clamp(uGrainSize, 0.0, 1.0);
+    vec2 p = vUv * uTexSize / cell;
+    vec2 i = floor(p);
+    vec2 f = p - i;
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    float n00 = hashCell(i);
+    float n10 = hashCell(i + vec2(1.0, 0.0));
+    float n01 = hashCell(i + vec2(0.0, 1.0));
+    float n11 = hashCell(i + vec2(1.0, 1.0));
+    float n = mix(mix(n00, n10, u.x), mix(n01, n11, u.x), u.y) * 2.0 - 1.0;
     float luma = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
     float mask = smoothstep(0.0, 0.15, luma) * (1.0 - smoothstep(0.85, 1.0, luma));
     outColor = clamp(outColor + GRAIN_STRENGTH * uGrain * n * mask, 0.0, 1.0);

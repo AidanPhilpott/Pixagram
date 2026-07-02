@@ -43,6 +43,7 @@ import {
   defaultAdjustments,
   fullFrameCrop,
   isNeutralAdjustments,
+  sameLook,
   type Adjustments,
   type CropRect,
   type CurvePoint,
@@ -642,6 +643,14 @@ export function App() {
     ];
   }, [menu, editedIds, copiedAdjustments, resetPhotos, copyAdjustments, pasteAdjustments, applyToPhotos]);
 
+  // Which preset the selected photo's stack currently IS (look-equality,
+  // geometry ignored). Derived, not bookkept: any edit that dirties the look
+  // clears it automatically, and undoing back to the preset re-lights it.
+  const activePresetName = useMemo(() => {
+    if (!selected) return null;
+    return presets.find((p) => sameLook(adjustments, p.adjustments))?.name ?? null;
+  }, [selected, adjustments, presets]);
+
   // ── Preset favorites — the inspector panel lists ONLY these; the manager
   // modal curates them. Persisted as names in <app-data>/preset-favorites.json.
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -834,6 +843,7 @@ export function App() {
             <PresetPanel
               presets={presets}
               favorites={favorites}
+              activePreset={activePresetName}
               disabled={!selected || showOriginal}
               applyCount={selectedIds.size}
               onApply={applyPreset}
@@ -861,6 +871,7 @@ export function App() {
           canApply={!!selected && !showOriginal}
           currentPreview={preview}
           currentLabel={selected?.fileName ?? null}
+          onDelete={handleDeletePreset}
           onClose={() => setManagerOpen(false)}
         />
       )}

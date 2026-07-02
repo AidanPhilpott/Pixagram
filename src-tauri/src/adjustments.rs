@@ -273,7 +273,8 @@ const CC_SAT_STRENGTH: f32 = 0.10;
 
 /// Full-scale luminance amplitude of the film grain (strength 1.0, midtone
 /// pixel). Tunable; MUST match `GRAIN_STRENGTH` in the GLSL shader.
-const GRAIN_STRENGTH: f32 = 0.15;
+/// Was 0.15 — halved after user feedback that grain was far too loud.
+const GRAIN_STRENGTH: f32 = 0.08;
 
 /// Decode one sRGB-encoded channel value (0..=1) to linear light.
 #[inline]
@@ -489,20 +490,32 @@ fn hash_cell(x: f32, y: f32) -> f32 {
 ///
 /// Spatial — the coordinate-needing counterpart to [`apply_pixel`]; the exporter
 /// must call this per pixel AFTER `apply_pixel` (grain sits on top of the final
-/// color, like real film). Monochromatic luminance noise, one random value per
-/// grain cell (`1 + 2·grain_size` px square), scaled by a midtone mask so pure
-/// black/white stay clean. **Mirror of the grain block at the end of the GLSL
-/// shader's `main()` — edit both together.** Preview grain is computed at
-/// preview resolution, so it matches the export in character, not per-pixel.
+/// color, like real film). Monochromatic luminance **smooth value noise**: the
+/// four surrounding grain-cell hashes are bilinearly blended (Hermite-eased),
+/// so grain reads as soft, roundish clumps rather than hard square blocks —
+/// nearest-cell quantization was visibly "square" (user report). Cell size is
+/// `1.5 + 2·grain_size` px; a midtone mask keeps pure black/white clean.
+/// **Mirror of the grain block at the end of the GLSL shader's `main()` — edit
+/// both together.** Preview grain is computed at preview resolution, so it
+/// matches the export in character, not per-pixel.
 #[inline]
 pub fn apply_grain(rgb: [f32; 3], x: u32, y: u32, adj: &Adjustments) -> [f32; 3] {
     if adj.grain <= 0.0 {
         return rgb;
     }
-    let cell = 1.0 + 2.0 * adj.grain_size.clamp(0.0, 1.0);
-    let cx = (x as f32 / cell).floor();
-    let cy = (y as f32 / cell).floor();
-    let n = hash_cell(cx, cy) * 2.0 - 1.0;
+    let cell = 1.5 + 2.0 * adj.grain_size.clamp(0.0, 1.0);
+    let px = x as f32 / cell;
+    let py = y as f32 / cell;
+    let (ix, iy) = (px.floor(), py.floor());
+    let (fx, fy) = (px - ix, py - iy);
+    // Hermite easing — mirrors the GLSL smoothstep-shaped fractional part.
+    let ux = fx * fx * (3.0 - 2.0 * fx);
+    let uy = fy * fy * (3.0 - 2.0 * fy);
+    let n00 = hash_cell(ix, iy);
+    let n10 = hash_cell(ix + 1.0, iy);
+    let n01 = hash_cell(ix, iy + 1.0);
+    let n11 = hash_cell(ix + 1.0, iy + 1.0);
+    let n = lerp(lerp(n00, n10, ux), lerp(n01, n11, ux), uy) * 2.0 - 1.0;
     let luma = luminance(rgb);
     let mask = smoothstep(0.0, 0.15, luma) * (1.0 - smoothstep(0.85, 1.0, luma));
     let d = GRAIN_STRENGTH * adj.grain * n * mask;
@@ -883,18 +896,27 @@ mod tests {
     }
 
     #[test]
-    fn grain_size_grows_the_cells() {
-        // With coarse grain, adjacent pixels inside one 3px cell share a value.
-        let coarse = Adjustments { grain: 1.0, grain_size: 1.0, ..Default::default() };
+    fn grain_size_grows_the_clumps() {
+        // Smooth value noise: coarse grain must vary SLOWER across neighboring
+        // pixels than fine grain (bigger, softer clumps). Compare the mean
+        // absolute pixel-to-pixel step along a row.
         let px = [0.5; 3];
-        let a = apply_grain(px, 0, 0, &coarse);
-        let b = apply_grain(px, 2, 2, &coarse);
-        assert_eq!(a, b, "pixels in the same 3px cell share one grain value");
-        // With fine grain those same coordinates are different cells.
-        let fine = Adjustments { grain: 1.0, grain_size: 0.0, ..Default::default() };
-        let c = apply_grain(px, 0, 0, &fine);
-        let d = apply_grain(px, 2, 2, &fine);
-        assert_ne!(c, d, "fine grain resolves per pixel");
+        let mean_step = |size: f32| {
+            let adj = Adjustments { grain: 1.0, grain_size: size, ..Default::default() };
+            let mut total = 0.0;
+            for x in 0..64 {
+                let a = apply_grain(px, x, 10, &adj)[0];
+                let b = apply_grain(px, x + 1, 10, &adj)[0];
+                total += (a - b).abs();
+            }
+            total / 64.0
+        };
+        let fine = mean_step(0.0);
+        let coarse = mean_step(1.0);
+        assert!(
+            coarse < fine * 0.75,
+            "coarse grain should vary slower: fine step {fine}, coarse step {coarse}"
+        );
     }
 
     #[test]

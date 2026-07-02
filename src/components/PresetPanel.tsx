@@ -5,6 +5,9 @@ interface PresetPanelProps {
   presets: Preset[];
   /** Names of favorited presets — the ONLY ones this panel lists. */
   favorites: ReadonlySet<string>;
+  /** The preset the selected photo's stack currently equals (look-wise), or
+   *  null once any edit has dirtied it into a custom setting. */
+  activePreset: string | null;
   /** No photo selected — applying and saving make no sense. */
   disabled: boolean;
   /** How many photos an apply currently targets (grid multi-select). */
@@ -27,6 +30,7 @@ interface PresetPanelProps {
 export function PresetPanel({
   presets,
   favorites,
+  activePreset,
   disabled,
   applyCount,
   onApply,
@@ -96,14 +100,26 @@ export function PresetPanel({
               </button>
             </div>
           ) : (
-            <div className="preset-row" key={p.name}>
+            <div
+              className={`preset-row${
+                p.name === activePreset ? " preset-row--active" : ""
+              }`}
+              key={p.name}
+            >
               <button
                 className="preset-row__apply"
                 disabled={disabled}
                 title={`Apply "${p.name}"`}
                 onClick={() => onApply(p)}
               >
-                <span className="preset-row__name">{p.name}</span>
+                <span className="preset-row__name">
+                  {p.name === activePreset && (
+                    <span className="preset-row__check" aria-label="Active">
+                      ✓{" "}
+                    </span>
+                  )}
+                  {p.name}
+                </span>
                 {p.builtin && <span className="preset-row__tag">built-in</span>}
               </button>
               {!p.builtin && (

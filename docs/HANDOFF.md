@@ -107,8 +107,13 @@ dev task first — built-ins/commands live in the Rust binary):
   default favorites; starring/unstarring persists across restarts; benchmark
   previews update instantly per preset; Soft Film reads as a gentle fade (not
   milky); "Classic Portrait" flatters skin on a real portrait RAF.
-- Effects: grain looks like film at Weak/Small vs Strong/Large; color chrome
-  deepens saturated reds/blues, greys untouched.
+- Effects: grain looks like film at Weak/Small vs Strong/Large — soft round
+  clumps, NOT square blocks, and subtle (reworked to smooth value noise at
+  half strength after user feedback); color chrome deepens saturated
+  reds/blues, greys untouched.
+- Preset panel highlights the applied preset (✓ + accent) and clears the
+  highlight the moment any slider dirties the look; manager modal is larger,
+  tiles are tight/uniform, user presets deletable from the manager.
 - Library UX: ✎ badge tracks edits/reset/undo; context-menu actions on a
   multi-selection; Show in Explorer highlights the file.
 - **Phase 4:** crop drag feel (handles, move, thirds grid), straighten slider

@@ -250,8 +250,8 @@ body {
   justify-content: center;
 }
 .preset-manager {
-  width: min(860px, calc(100vw - 48px));
-  height: min(560px, calc(100vh - 48px));
+  width: min(1240px, calc(100vw - 48px));
+  height: min(820px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
   background: var(--panel-raised);
@@ -354,11 +354,12 @@ body {
   flex-direction: column;
   gap: 12px;
 }
-/* Uniform tile grid for the benchmark examples. */
+/* Uniform tile grid for the benchmark examples — tight, equal-sized tiles
+   (mixed source aspects are center-cropped by the canvas object-fit). */
 .preset-manager__tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 6px;
   align-content: flex-start;
 }
 /* "Your photo" mode: one large tile. */
@@ -367,9 +368,16 @@ body {
 }
 .preset-manager__figure {
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  position: relative;
+}
+/* Caption overlays the tile corner instead of adding row whitespace. */
+.preset-manager__figure figcaption {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(14, 15, 17, 0.72);
 }
 /* Preview-source toggle (Examples / Your photo). */
 .preset-manager__source {
@@ -404,10 +412,33 @@ body {
   color: var(--text-dim);
 }
 .preset-manager__bench {
+  display: block;
   width: 100%;
-  height: auto;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
   border-radius: var(--radius-sm);
   background: #0e0f11;
+}
+/* "Your photo" tile keeps the photo's own aspect (no crop). */
+.preset-manager__tiles--single .preset-manager__bench {
+  aspect-ratio: auto;
+  object-fit: contain;
+  max-height: 100%;
+}
+.preset-manager__delete {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.preset-manager__delete:hover {
+  background: rgba(220, 90, 90, 0.18);
+  color: #e08585;
 }
 .preset-manager__apply {
   flex-basis: 100%;
@@ -951,6 +982,14 @@ input[type="range"]::-webkit-slider-thumb {
 .preset-row__apply:disabled {
   opacity: 0.45;
   cursor: default;
+}
+/* The preset the photo's stack currently equals — cleared by any edit. */
+.preset-row--active .preset-row__apply {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.preset-row__check {
+  color: var(--accent);
 }
 .preset-row__name {
   white-space: nowrap;

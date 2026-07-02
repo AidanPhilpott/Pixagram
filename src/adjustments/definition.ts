@@ -107,6 +107,41 @@ export function isNeutralAdjustments(a: Adjustments): boolean {
   );
 }
 
+/**
+ * True when two stacks are the same LOOK — every color/effect field equal,
+ * geometry (rotation/straighten/crop) deliberately ignored, matching how
+ * presets apply (look transfers, geometry stays per-shot). Drives the
+ * active-preset indicator: applying a preset makes its look identical to the
+ * photo's stack; any subsequent edit breaks the equality (and undoing back
+ * restores it), so "which preset is active" is derived, never bookkept.
+ */
+export function sameLook(a: Adjustments, b: Adjustments): boolean {
+  const eq = (x: number, y: number) => Math.abs(x - y) < 1e-6;
+  return (
+    eq(a.exposure, b.exposure) &&
+    eq(a.contrast, b.contrast) &&
+    eq(a.temperature, b.temperature) &&
+    eq(a.tint, b.tint) &&
+    eq(a.highlights, b.highlights) &&
+    eq(a.shadows, b.shadows) &&
+    eq(a.whites, b.whites) &&
+    eq(a.blacks, b.blacks) &&
+    eq(a.saturation, b.saturation) &&
+    eq(a.vibrance, b.vibrance) &&
+    eq(a.colorChrome, b.colorChrome) &&
+    eq(a.colorChromeBlue, b.colorChromeBlue) &&
+    eq(a.grain, b.grain) &&
+    eq(a.grainSize, b.grainSize) &&
+    a.hsl.length === b.hsl.length &&
+    a.hsl.every(
+      (band, i) =>
+        eq(band.hue, b.hsl[i].hue) && eq(band.sat, b.hsl[i].sat) && eq(band.lum, b.hsl[i].lum)
+    ) &&
+    a.curve.length === b.curve.length &&
+    a.curve.every((p, i) => eq(p.x, b.curve[i].x) && eq(p.y, b.curve[i].y))
+  );
+}
+
 /** UI bounds for the exposure slider (stops). Tunable constant, not architecture. */
 export const EXPOSURE_RANGE = { min: -5, max: 5, step: 0.01 } as const;
 

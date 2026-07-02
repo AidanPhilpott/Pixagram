@@ -149,6 +149,35 @@ Manage-presets buttons. `decodeU16` extracted to `src/lib/pixels.ts`.
 
 ---
 
+## 2026-07-02 (session 6, continued) — grain quality fix + manager polish + active-preset indicator
+
+**Grain rework (user report: "far too noisy, and square").** Two root causes:
+nearest-cell quantization (hard square blocks) and GRAIN_STRENGTH 0.15 (too
+loud). Grain is now **smooth value noise** — the four surrounding cell hashes
+bilinearly blended with Hermite easing, so clumps read soft and roundish —
+with GRAIN_STRENGTH halved to 0.08 and cells at `1.5 + 2·size` px. Rust
+`apply_grain` ↔ shader grain block updated together (lockstep); the
+cell-size test became a smoothness test (coarse grain must vary slower
+across pixels than fine). Note: some of the reported blotchiness on the
+beach ARW is likely the photo's own high-ISO chroma noise amplified by
+vibrance/color-chrome — we have no NR op yet (recipes' NR settings are
+dropped); candidate future op.
+
+**Manager polish:** modal enlarged (1240×820 max); benchmark tiles are a
+tight uniform grid (6px gap, 3:2 center-cropped via canvas object-fit,
+captions overlay the tile corner); user presets can be deleted from the
+manager (×, selection falls back when the previewed one dies).
+
+**Active-preset indicator:** the panel highlights (accent + ✓) the preset the
+photo's stack currently equals. Derived via `sameLook` (look fields only,
+geometry ignored — matching apply semantics), so any edit dirties it to
+"custom" automatically and undo back to the preset re-lights it. No
+bookkeeping, survives restarts.
+
+55 Rust tests + `npm run build` pass.
+
+---
+
 ## 2026-07-02 (session 5, wrap-up) — app-verified, tagged v0.3.0
 
 **Human verification passed.** The user ran the app with Fuji RAFs and Sony

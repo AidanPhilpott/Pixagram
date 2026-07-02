@@ -16,19 +16,28 @@ in [../CLAUDE.md](../CLAUDE.md).)
   Build Tools** (the linker — installed via VS 2022 Build Tools, `VCTools`
   workload), and the **WebView2 runtime** (already present on Win11). rustc finds
   `link.exe` automatically via the VS registry once Build Tools are installed.
-- **Stale SMB locks on the NAS can brick `tauri dev` for hours.** A killed dev
-  run leaves the NAS holding open handles on whatever it had loaded — seen on
-  `tauri-dev.log` AND the native `.node` modules (`@tauri-apps/cli-*`,
-  `@rollup/rollup-*`), which then fail with "being used by another process" /
-  EBUSY even though NO local process holds them (the handles belong to the Task
-  Scheduler batch-logon's *own* SMB session, so `net use Z: /delete` on the
-  interactive session doesn't clear them). Diagnosis: `head -c` the file — EBUSY
-  with zero owning processes = stale NAS handle. **Recovery that works: rename
-  the locked package dir aside (renames succeed even when reads fail) and
-  `npm i` to lay down fresh files.** Prevention baked into `run-dev.cmd`: logs
-  go to local `%TEMP%`, and it runs Vite + `cargo run` directly instead of the
-  npm Tauri CLI (debug builds embed `devUrl` themselves), so a future kill has
-  almost nothing on the share to poison.
+- **"Stale SMB locks" after a killed dev run — check for ORPHANED PROCESSES
+  FIRST.** A killed `tauri dev` bricked every relaunch with EBUSY / "being used
+  by another process" on `tauri-dev.log`, the `.node` modules
+  (`@tauri-apps/cli-*`, `@rollup/rollup-*`), `esbuild.exe`, and
+  `target/debug/pixagram.exe`. Root cause was two-part:
+  1. **An orphaned `esbuild.exe` service process was still alive** — invisible
+     to every scan that filtered on `node|npm|cargo|vite|pixagram` (its name
+     matches none of them, and Vite's esbuild service survives its parent
+     node). Scan by *executable path*, not name:
+     `Get-CimInstance Win32_Process | ? { $_.ExecutablePath -like 'Z:\*' }`.
+  2. Handles from truly-dead processes lingered NAS-side under the **Task
+     Scheduler batch-logon's own SMB session** — `net use Z: /delete` on the
+     interactive session does not touch them.
+  Recovery that works without waiting: **rename the locked dir/file aside
+  (renames usually succeed when reads fail) and `npm i` to restore fresh
+  copies** — but a rename can also hang minutes on a lease-break and wedge the
+  whole directory (hit on `target/debug/`), so don't block on it. Prevention,
+  baked into `run-dev.cmd`: run Vite + `cargo run` directly (skip the npm Tauri
+  CLI's `.node`; debug builds embed `devUrl` themselves), **CARGO_TARGET_DIR on
+  local disk** (`%LOCALAPPDATA%\pixagram\target` — also much faster than
+  building onto the NAS), and logs in local `%TEMP%`. After that, nothing a dev
+  run opens for write lives on the share.
 
 ## Raw decode (rawler 0.7.2)
 

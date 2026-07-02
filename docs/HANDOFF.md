@@ -5,10 +5,13 @@
 > dated entry to [PROGRESS.md](PROGRESS.md) for the running history, and add any
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
-**Last updated:** 2026-07-01 (session 5 — multi-agent batch + consolidation)
-**Current phase:** Phase 3 (Presets) — **BUILT, plus a large feature batch;
-needs a human app run-through before tagging `v0.3.0`.** Landed this session as
-4 commits (`51dae30`…`c015c8e`):
+**Last updated:** 2026-07-02 (session 5 — multi-agent batch, consolidated,
+**human-verified**)
+**Current phase:** Phase 3 (Presets) — **COMPLETE, APP-VERIFIED, tagged
+`v0.3.0`.** The user ran the app with Fuji RAFs and Sony A7II ARWs loaded
+side-by-side: batch import of both formats, presets (apply/save/batch), zoom,
+rotate, view-original, and undo/redo all confirmed working. Landed as 4
+feature commits (`51dae30`…`c015c8e`) plus launcher hardening:
 - **Presets (Phase 3, model A):** JSON store under `<app-data>/presets/` with
   list/save/delete/rename commands, 4 built-ins, `PresetPanel` in the
   inspector, Ctrl/Shift grid multi-select + batch apply.
@@ -31,7 +34,7 @@ needs a human app run-through before tagging `v0.3.0`.** Landed this session as
 
 42 Rust tests + `npm run build` pass. ts-rs types regenerated (now include
 `rotation` and `Preset`).
-**Branch:** `master` (local-only, no remote) · **Last tag:** `v0.2.0`
+**Branch:** `master` (local-only, no remote) · **Last tag:** `v0.3.0`
 
 > **Color-profile / "Fuji recipe" feature → SHIPPED as Phase 3 presets, model
 > (A):** a preset is a named, editable `Adjustments` JSON bundle; a base
@@ -41,15 +44,23 @@ needs a human app run-through before tagging `v0.3.0`.** Landed this session as
 
 ## ⚠️ START HERE NEXT SESSION
 
-1. **Human verification pass** (can't be done from the sandbox): run the app,
-   eyeball undo/redo, `\` original view, collapsed inspector, zoom/pan,
-   rotation (incl. persistence across a restart), presets (save/apply/batch,
-   built-ins), and a Sony ARW import (thumbs from the embedded JPEG, neutral
-   develop, no sidecar needed). Then tag `v0.3.0`.
-2. **Remaining phase work, in order:** Phase 4 leftovers (crop + free
-   straighten — 90° rotate is done), then Phase 5 export (real JPEG + borders +
-   sRGB tag + EXIF policy decision + batch/naming), Phase 6 polish, Phase 7
-   macOS.
+Phase 3 is verified and tagged. Remaining phase work, in order:
+1. **Phase 4 leftovers: crop + free straighten** (90° rotate is done and
+   persists). Both are geometry like rotation — follow its pattern: field(s)
+   on `Adjustments` (`#[serde(default)]` + ts-rs), GPU-side geometry in
+   `PreviewRenderer`, Rust-side in `export.rs`, lockstep documented in
+   `adjustments.rs`.
+2. **Phase 5 export:** real JPEG + borders + sRGB tag + batch + naming. Settle
+   two open decisions with the user first: **EXIF policy** (preserve / strip /
+   preserve-minus-GPS) and the **export-quality demosaic** (area-averaging is
+   preview-grade; full-res export wants Markesteijn-class — see Open risks).
+3. Then Phase 6 polish (undo/redo shipped early; caching + UI refinement
+   remain), Phase 7 macOS.
+
+**Dev launch:** `Start-ScheduledTask -TaskName PixagramDev` → `run-dev.cmd`
+(Vite + `cargo run` direct; local `CARGO_TARGET_DIR`; logs in
+`%TEMP%\pixagram-*.log`). Do NOT reintroduce share-side logs/builds/CLI —
+see INSIGHTS "stale SMB locks".
 
 ---
 

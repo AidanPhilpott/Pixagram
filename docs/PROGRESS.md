@@ -7,6 +7,28 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-07-02 (session 5, wrap-up) — app-verified, tagged v0.3.0
+
+**Human verification passed.** The user ran the app with Fuji RAFs and Sony
+A7II ARWs imported side-by-side and confirmed the whole session-5 batch in
+one pass: mixed-format batch import, presets (apply/save/batch), zoom,
+rotate, view-original, and undo/redo. Tagged **`v0.3.0`**.
+
+**Launch debugging (the time sink, now permanently fixed):** relaunching the
+dev app kept failing with EBUSY on files a previously-killed run had open —
+`tauri-dev.log`, the Tauri-CLI / rollup `.node` modules, `esbuild.exe`, then
+`target/debug/pixagram.exe`. Real diagnosis: (1) an **orphaned esbuild.exe
+service process** was still alive, invisible to name-filtered process scans —
+found only by scanning `Win32_Process` by *executable path on Z:*; (2) handles
+of truly-dead processes lingered NAS-side under the Task Scheduler batch
+logon's own SMB session. Fix in `run-dev.cmd`: run Vite + `cargo run` directly
+(skip the npm Tauri CLI), `CARGO_TARGET_DIR` on local disk, logs in local
+`%TEMP%` — nothing a dev run opens for write lives on the share anymore.
+Recovery playbook in INSIGHTS. Two inert NAS-locked leftovers (old
+`tauri-dev.log`, old `target/debug/pixagram.exe`) clear on handle expiry.
+
+---
+
 ## 2026-07-01 (session 5, consolidation) — Phase 3 + editing UX + viewport + multi-format RAW
 
 Four parallel worktree agents were launched (presets / editing-UX / viewport /

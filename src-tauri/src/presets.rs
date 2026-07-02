@@ -22,7 +22,7 @@ use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::adjustments::{Adjustments, CurvePoint};
+use crate::adjustments::{Adjustments, CurvePoint, HslBand};
 
 /// Bump when the preset *file layout* changes (name/version/adjustments keys).
 /// Growing `Adjustments` itself does NOT need a bump — serde defaults cover it.
@@ -51,6 +51,17 @@ struct PresetFile {
     name: String,
     #[serde(default)]
     adjustments: Adjustments,
+}
+
+/// 8 neutral HSL bands with `edits` applied — `(band index, hue, sat, lum)`.
+/// Band order matches `HSL_BANDS` in the TS mirror: red 0, orange 1, yellow 2,
+/// green 3, aqua 4, blue 5, purple 6, magenta 7.
+fn hsl_bands(edits: &[(usize, f32, f32, f32)]) -> Vec<HslBand> {
+    let mut bands = vec![HslBand::default(); 8];
+    for &(i, hue, sat, lum) in edits {
+        bands[i] = HslBand { hue, sat, lum };
+    }
+    bands
 }
 
 /// The presets that ship with the app. Defined in code (not files) so they're
@@ -99,6 +110,126 @@ pub fn builtin_presets() -> Vec<Preset> {
                 contrast: 0.35,
                 whites: 0.1,
                 blacks: -0.15,
+                ..Default::default()
+            },
+        ),
+        // Portra-400-style portrait negative, translated from a Classic Chrome
+        // recipe (Fuji X Weekly's "Reggie's Portra": Highlight -1, Shadow -1,
+        // Color +2, Grain Weak/Small, CC Strong, CCB Weak, WB +2R/-4B).
+        // Mapping: Highlight -1 → soft highlight rolloff; Shadow -1 → lifted
+        // shadows; +2R/-4B → warm temp with a hair of green (less blue = more
+        // yellow); Color +2 over Chrome's muted base → vibrance up, saturation
+        // a touch down; muted yellow-leaning greens + subdued blues via HSL.
+        // (NR -4 / Sharpening -2 / DR-Auto have no counterpart ops yet.)
+        builtin(
+            "Classic Portrait",
+            Adjustments {
+                temperature: 0.2,
+                tint: -0.05,
+                highlights: -0.35,
+                shadows: 0.3,
+                vibrance: 0.2,
+                saturation: -0.05,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.03 },
+                    CurvePoint { x: 1.0, y: 0.98 },
+                ],
+                hsl: hsl_bands(&[
+                    (1, 0.0, -0.05, 0.05),   // orange: flatter, brighter skin
+                    (3, -0.15, -0.2, 0.0),   // green: muted, leaning yellow
+                    (4, 0.0, -0.1, 0.0),     // aqua: slightly muted
+                    (5, 0.0, -0.15, 0.0),    // blue: Chrome's subdued blues
+                ]),
+                grain: 0.25,
+                grain_size: 0.0,
+                color_chrome: 1.0,
+                color_chrome_blue: 0.5,
+                ..Default::default()
+            },
+        ),
+        // Velvia-ish slide film for landscapes: big color, deep tone.
+        builtin(
+            "Vivid Slide",
+            Adjustments {
+                contrast: 0.3,
+                vibrance: 0.4,
+                saturation: 0.1,
+                blacks: -0.1,
+                color_chrome: 0.5,
+                ..Default::default()
+            },
+        ),
+        // Classic-Chrome-flavoured documentary look: muted color, harder tone.
+        builtin(
+            "Muted Chrome",
+            Adjustments {
+                contrast: 0.15,
+                highlights: -0.15,
+                shadows: -0.1,
+                saturation: -0.25,
+                temperature: -0.03,
+                hsl: hsl_bands(&[
+                    (5, 0.0, -0.3, -0.05),   // blue: strongly subdued
+                    (0, 0.1, -0.1, 0.0),     // red: nudged toward orange
+                ]),
+                color_chrome: 0.3,
+                ..Default::default()
+            },
+        ),
+        // Late-light warmth: glowing highlights, gentle color lift.
+        builtin(
+            "Golden Hour",
+            Adjustments {
+                temperature: 0.3,
+                highlights: -0.2,
+                shadows: 0.1,
+                vibrance: 0.25,
+                hsl: hsl_bands(&[
+                    (1, 0.0, 0.1, 0.1),      // orange: richer, brighter
+                ]),
+                ..Default::default()
+            },
+        ),
+        // Teal-and-warm cinematic grade with a lifted matte floor.
+        builtin(
+            "Cinema Teal",
+            Adjustments {
+                contrast: 0.2,
+                temperature: 0.08,
+                blacks: 0.05,
+                hsl: hsl_bands(&[
+                    (5, -0.3, -0.1, 0.0),    // blue: pulled toward teal
+                    (4, 0.0, 0.1, 0.0),      // aqua: reinforced
+                    (1, 0.0, 0.15, 0.0),     // orange: skin held warm
+                ]),
+                ..Default::default()
+            },
+        ),
+        // Washed matte film: low contrast, faded floor, coarse grain.
+        builtin(
+            "Faded Matte",
+            Adjustments {
+                contrast: -0.2,
+                saturation: -0.3,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.08 },
+                    CurvePoint { x: 1.0, y: 0.94 },
+                ],
+                grain: 0.35,
+                grain_size: 0.6,
+                ..Default::default()
+            },
+        ),
+        // Pushed-film B&W street look: hard tone, heavy coarse grain.
+        builtin(
+            "Grainy Mono",
+            Adjustments {
+                saturation: -1.0,
+                contrast: 0.3,
+                whites: 0.1,
+                blacks: -0.1,
+                grain: 0.55,
+                grain_size: 0.7,
                 ..Default::default()
             },
         ),

@@ -1,33 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PreviewRenderer } from "../gl/PreviewRenderer";
-import type { Preset } from "../lib/ipc";
+import { decodeU16, rgbaToU16 } from "../lib/pixels";
+import type { Preset, PreviewPayload } from "../lib/ipc";
 import { fullFrameCrop, type Adjustments } from "../adjustments/definition";
 
 /**
  * The bundled benchmark set (public/benchmark/, see the README there): the
- * classic Kodak test-suite images, picked for versatility — skin tones,
- * whites/sky/foliage, and saturated color — so a preset's character shows
- * at a glance.
+ * classic Kodak test-suite images plus two CC0 landscapes, picked for
+ * versatility — skin tones, whites/sky, saturated color, lush greens, and
+ * snow — so a preset's character shows at a glance.
  */
 const BENCHMARKS = [
-  { src: "/benchmark/portrait.jpg", label: "Portrait (skin tones)" },
-  { src: "/benchmark/landscape.jpg", label: "Landscape (whites, sky)" },
-  { src: "/benchmark/color.jpg", label: "Color (saturated primaries)" },
+  { src: "/benchmark/portrait.jpg", label: "Portrait" },
+  { src: "/benchmark/landscape.jpg", label: "Lighthouse" },
+  { src: "/benchmark/color.jpg", label: "Saturated color" },
+  { src: "/benchmark/rainforest.jpg", label: "Rainforest greens" },
+  { src: "/benchmark/snowy.jpg", label: "Snowy range" },
 ] as const;
 
+/** What a preview tile renders: a bundled benchmark URL, or raw preview pixels. */
+type TileImage = { src: string } | { payload: PreviewPayload };
+
 /**
- * One benchmark image rendered through the REAL preview pipeline
+ * One preview tile rendered through the REAL preview pipeline
  * (`PreviewRenderer` + the shared shader), so the example is exactly what the
  * preset does — not a pre-baked approximation. Selecting another preset is a
  * GPU-only uniform update, i.e. instant.
  */
-function BenchmarkPreview({ src, adjustments }: { src: string; adjustments: Adjustments }) {
+function PresetTile({ image, adjustments }: { image: TileImage; adjustments: Adjustments }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<PreviewRenderer | null>(null);
   // The image may still be loading when the selection changes; render with
   // whatever adjustments are current once it lands.
   const adjRef = useRef(adjustments);
   adjRef.current = adjustments;
+
+  const src = "src" in image ? image.src : null;
+  const payload = "payload" in image ? image.payload : null;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -40,33 +49,36 @@ function BenchmarkPreview({ src, adjustments }: { src: string; adjustments: Adju
     }
     rendererRef.current = renderer;
 
-    const img = new Image();
-    img.onload = () => {
-      if (rendererRef.current !== renderer) return; // unmounted meanwhile
-      const scratch = document.createElement("canvas");
-      scratch.width = img.naturalWidth;
-      scratch.height = img.naturalHeight;
-      const ctx = scratch.getContext("2d");
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0);
-      const rgba = ctx.getImageData(0, 0, scratch.width, scratch.height).data;
-      // 8-bit sRGB → the renderer's 16-bit layout (v * 257 spreads to 0..65535).
-      const u16 = new Uint16Array(scratch.width * scratch.height * 3);
-      for (let i = 0, j = 0; i < rgba.length; i += 4) {
-        u16[j++] = rgba[i] * 257;
-        u16[j++] = rgba[i + 1] * 257;
-        u16[j++] = rgba[i + 2] * 257;
+    if (payload) {
+      // The current photo's developed preview — already the renderer's format.
+      try {
+        renderer.setImage(payload.width, payload.height, decodeU16(payload.data));
+        renderer.setAdjustments(adjRef.current);
+      } catch {
+        /* tile stays empty */
       }
-      renderer.setImage(scratch.width, scratch.height, u16);
-      renderer.setAdjustments(adjRef.current);
-    };
-    img.src = src;
+    } else if (src) {
+      const img = new Image();
+      img.onload = () => {
+        if (rendererRef.current !== renderer) return; // unmounted meanwhile
+        const scratch = document.createElement("canvas");
+        scratch.width = img.naturalWidth;
+        scratch.height = img.naturalHeight;
+        const ctx = scratch.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0);
+        const rgba = ctx.getImageData(0, 0, scratch.width, scratch.height).data;
+        renderer.setImage(scratch.width, scratch.height, rgbaToU16(rgba));
+        renderer.setAdjustments(adjRef.current);
+      };
+      img.src = src;
+    }
 
     return () => {
       renderer.dispose();
       if (rendererRef.current === renderer) rendererRef.current = null;
     };
-  }, [src]);
+  }, [src, payload]);
 
   useEffect(() => {
     rendererRef.current?.setAdjustments(adjustments);
@@ -83,13 +95,17 @@ interface PresetManagerModalProps {
   onApply: (preset: Preset) => void;
   applyCount: number;
   canApply: boolean;
+  /** The selected photo's developed preview, for the "Your photo" source. */
+  currentPreview: PreviewPayload | null;
+  /** The selected photo's file name (labels the "Your photo" tile). */
+  currentLabel: string | null;
   onClose: () => void;
 }
 
 /**
  * The preset manager: browse EVERY preset (the inspector panel lists only
- * favorites), star/unstar favorites, and preview any preset live on the
- * benchmark images before applying it.
+ * favorites), star/unstar favorites, and preview any preset live — on the
+ * bundled benchmark tiles, or on the photo currently selected in the grid.
  */
 export function PresetManagerModal({
   presets,
@@ -98,11 +114,15 @@ export function PresetManagerModal({
   onApply,
   applyCount,
   canApply,
+  currentPreview,
+  currentLabel,
   onClose,
 }: PresetManagerModalProps) {
   const [selectedName, setSelectedName] = useState<string | null>(
     presets.length > 0 ? presets[0].name : null
   );
+  // Preview source: the benchmark examples, or the currently selected photo.
+  const [source, setSource] = useState<"examples" | "photo">("examples");
   const selected = presets.find((p) => p.name === selectedName) ?? null;
   // Benchmarks preview the LOOK only — presets saved before geometry was
   // stripped at save time may still carry a rotation/crop; neutralize it.
@@ -122,6 +142,8 @@ export function PresetManagerModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
+  const showPhoto = source === "photo" && currentPreview;
+
   return (
     <div
       className="modal-backdrop"
@@ -135,6 +157,26 @@ export function PresetManagerModal({
           <span className="preset-manager__hint">
             ★ favorites appear in the inspector panel
           </span>
+          <div className="preset-manager__source" role="tablist" aria-label="Preview source">
+            <button
+              className={`preset-manager__source-btn${
+                source === "examples" ? " preset-manager__source-btn--on" : ""
+              }`}
+              onClick={() => setSource("examples")}
+            >
+              Examples
+            </button>
+            <button
+              className={`preset-manager__source-btn${
+                source === "photo" ? " preset-manager__source-btn--on" : ""
+              }`}
+              disabled={!currentPreview}
+              title={currentPreview ? undefined : "Select a photo first"}
+              onClick={() => setSource("photo")}
+            >
+              Your photo
+            </button>
+          </div>
           <button className="preset-manager__close" onClick={onClose} title="Close (Esc)">
             ×
           </button>
@@ -171,12 +213,28 @@ export function PresetManagerModal({
           <div className="preset-manager__preview">
             {selected && previewAdjustments ? (
               <>
-                {BENCHMARKS.map((b) => (
-                  <figure key={b.src} className="preset-manager__figure">
-                    <BenchmarkPreview src={b.src} adjustments={previewAdjustments} />
-                    <figcaption>{b.label}</figcaption>
-                  </figure>
-                ))}
+                <div
+                  className={`preset-manager__tiles${
+                    showPhoto ? " preset-manager__tiles--single" : ""
+                  }`}
+                >
+                  {showPhoto ? (
+                    <figure className="preset-manager__figure" key="current-photo">
+                      <PresetTile
+                        image={{ payload: currentPreview }}
+                        adjustments={previewAdjustments}
+                      />
+                      <figcaption>{currentLabel ?? "Current photo"}</figcaption>
+                    </figure>
+                  ) : (
+                    BENCHMARKS.map((b) => (
+                      <figure key={b.src} className="preset-manager__figure">
+                        <PresetTile image={{ src: b.src }} adjustments={previewAdjustments} />
+                        <figcaption>{b.label}</figcaption>
+                      </figure>
+                    ))
+                  )}
+                </div>
                 <button
                   className="btn btn--accent preset-manager__apply"
                   disabled={!canApply}

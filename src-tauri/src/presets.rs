@@ -356,6 +356,385 @@ pub fn builtin_presets() -> Vec<Preset> {
                 ..Default::default()
             },
         ),
+        // ── Recipe translations, round 2 (session 6). Each maps a published
+        // recipe via the /fuji-recipe-to-preset skill; comments cite the
+        // source settings. Exposure is included ONLY where the recipe's
+        // exposure compensation is integral to the described look (bright /
+        // high-key recipes); DR / NR / Sharpness / Clarity have no ops. ──
+
+        // "Simon's Negative" (IG creator recipe): Classic Neg, +2R/-2B,
+        // Color +4, H +0.5 / S +0.5, grain Weak/Small, CC Strong, CCB Strong.
+        // An everyday punchy negative with crisp (not soft) tone ends.
+        builtin(
+            "Daily Neg",
+            Adjustments {
+                contrast: 0.2,
+                temperature: 0.13,
+                highlights: 0.15,
+                shadows: -0.15,
+                saturation: -0.15,
+                vibrance: 0.35,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.03 },
+                    CurvePoint { x: 1.0, y: 0.97 },
+                ],
+                hsl: hsl_bands(&[
+                    (3, -0.2, -0.15, 0.0),   // Classic Neg's yellow-leaning greens
+                    (4, 0.0, -0.15, 0.0),
+                ]),
+                grain: 0.25,
+                grain_size: 0.0,
+                color_chrome: 1.0,
+                color_chrome_blue: 1.0,
+                ..Default::default()
+            },
+        ),
+        // "Clockwise Negative" (IG creator recipe): Classic Neg, +1R/-3B,
+        // Color +4, H -1 / S -1.5 (both soft), grain Strong/Large, CC Strong,
+        // CCB Weak. The soft, faded sibling of Daily Neg.
+        builtin(
+            "Mellow Neg",
+            Adjustments {
+                contrast: 0.2,
+                temperature: 0.13,
+                tint: -0.05,
+                highlights: -0.3,
+                shadows: 0.45,
+                saturation: -0.15,
+                vibrance: 0.35,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.03 },
+                    CurvePoint { x: 1.0, y: 0.97 },
+                ],
+                hsl: hsl_bands(&[
+                    (3, -0.2, -0.15, 0.0),
+                    (4, 0.0, -0.15, 0.0),
+                ]),
+                grain: 0.5,
+                grain_size: 0.75,
+                color_chrome: 1.0,
+                color_chrome_blue: 0.5,
+                ..Default::default()
+            },
+        ),
+        // "After Rain" (IG creator recipe): Classic Neg, 5200K +3R/-4B,
+        // Color +4, H -0.5 / S +2.0 (deep hard shadows), grain Strong/Large,
+        // CC Strong, CCB Weak. Moody wet-street look.
+        builtin(
+            "Rainy Day",
+            Adjustments {
+                contrast: 0.2,
+                temperature: 0.17,
+                tint: -0.03,
+                highlights: -0.15,
+                shadows: -0.6,
+                saturation: -0.15,
+                vibrance: 0.35,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.03 },
+                    CurvePoint { x: 1.0, y: 0.97 },
+                ],
+                hsl: hsl_bands(&[
+                    (3, -0.2, -0.15, 0.0),
+                    (4, 0.0, -0.15, 0.0),
+                ]),
+                grain: 0.5,
+                grain_size: 0.75,
+                color_chrome: 1.0,
+                color_chrome_blue: 0.5,
+                ..Default::default()
+            },
+        ),
+        // Ricoh GR III "Royal Supra" (ricohrecipes.com street collection):
+        // Positive Film, Sat +2, Contrast +4 with Highlight-contrast -4 /
+        // Shadow-contrast -3, High/Low Key +1, WB Shade B:6 G:4. Punchy
+        // positive with compressed tone ends and a warm-green city cast.
+        // (Clarity +4 / corrections have no counterpart ops.)
+        builtin(
+            "City Positive",
+            Adjustments {
+                exposure: 0.1,
+                contrast: 0.35,
+                temperature: 0.15,
+                tint: -0.1,
+                highlights: -0.35,
+                shadows: 0.25,
+                saturation: 0.2,
+                blacks: -0.05,
+                ..Default::default()
+            },
+        ),
+        // "Snowy" (Reddit recipe): Classic Chrome, 5200K +1R/-6B, Color +2,
+        // Shadow -2 (lifted), grain Strong/Small, CC Strong, CCB Off,
+        // EC +1..+1.7 — the brightness is the look, so exposure is baked in.
+        builtin(
+            "Snow Chrome",
+            Adjustments {
+                exposure: 0.6,
+                contrast: 0.1,
+                temperature: 0.17,
+                tint: -0.12,
+                shadows: 0.5,
+                saturation: -0.25,
+                vibrance: 0.2,
+                hsl: hsl_bands(&[
+                    (5, 0.0, -0.25, 0.0),    // Chrome's subdued blues
+                    (0, 0.1, -0.1, 0.0),
+                ]),
+                grain: 0.5,
+                grain_size: 0.0,
+                color_chrome: 1.0,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "CineStill 400D v1": Astia, H +3 / S +1, Color +2,
+        // Fluor 1 -6R/-3B, grain Strong/Small, CC Strong, CCB Strong.
+        // "More contrast, leans green/yellow" — sunny-day cine negative.
+        builtin(
+            "Daylight Cine I",
+            Adjustments {
+                contrast: -0.1,
+                temperature: 0.1,
+                tint: -0.13,
+                highlights: 0.5,
+                shadows: -0.3,
+                vibrance: 0.35,
+                grain: 0.5,
+                grain_size: 0.0,
+                color_chrome: 1.0,
+                color_chrome_blue: 1.0,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "CineStill 400D v2": Astia, H -2 / S 0, Color +2,
+        // Fluor 1 -2R/+4B, grain Strong/Small, CC Strong, CCB Weak,
+        // EC +1/3..+1. "Less contrast, leans red/purple" — golden hour.
+        builtin(
+            "Daylight Cine II",
+            Adjustments {
+                exposure: 0.4,
+                contrast: -0.1,
+                tint: 0.1,
+                highlights: -0.6,
+                vibrance: 0.35,
+                grain: 0.5,
+                grain_size: 0.0,
+                color_chrome: 1.0,
+                color_chrome_blue: 0.5,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "CineStill 800T": Eterna, S +2, Color +4, Fluor 3
+        // -6R/-4B, grain Strong/Large, CC Strong, CCB Weak. Tungsten motion-
+        // picture stock: cool teal cast, flat base with hard shadows, heavy
+        // grain — the night-street look.
+        builtin(
+            "Tungsten Cine",
+            Adjustments {
+                contrast: -0.25,
+                temperature: -0.33,
+                tint: -0.15,
+                shadows: -0.6,
+                saturation: -0.35,
+                vibrance: 0.4,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.05 },
+                    CurvePoint { x: 1.0, y: 0.95 },
+                ],
+                grain: 0.5,
+                grain_size: 0.75,
+                color_chrome: 1.0,
+                color_chrome_blue: 0.5,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Kodak T-Max 100 (Soft Tone)": Monochrome+G, H -0.5 /
+        // S +1.5 with DR200, grain Weak/Large. Described result: "less
+        // contrast, softer highlights and lifted shadows" — the DR200 offsets
+        // the Shadow setting, so the net translation stays gentle.
+        builtin(
+            "Soft Mono 100",
+            Adjustments {
+                saturation: -1.0,
+                contrast: -0.05,
+                highlights: -0.15,
+                shadows: -0.2,
+                grain: 0.25,
+                grain_size: 0.75,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Ilford FP4 Plus 125": Monochrome, H -0.5 / S -1.5,
+        // grain Weak/Large. "Centered around the upper half of the grayscale…
+        // almost never goes entirely black" — soft, lifted, bright mono.
+        builtin(
+            "Classic Mono 125",
+            Adjustments {
+                saturation: -1.0,
+                contrast: -0.1,
+                highlights: -0.15,
+                shadows: 0.45,
+                blacks: 0.05,
+                grain: 0.25,
+                grain_size: 0.75,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Vibrant Arizona": Classic Chrome, 4350K +6R/-8B,
+        // Color +4, DR-P Strong, grain Weak/Small, CCB Weak, EC +2/3..+1 1/3.
+        // "Bright, colorful, and warm" — overexposed-negative desert pop.
+        builtin(
+            "Desert Punch",
+            Adjustments {
+                exposure: 0.5,
+                contrast: 0.1,
+                temperature: 0.24,
+                tint: -0.05,
+                highlights: -0.1,
+                shadows: 0.15,
+                saturation: -0.25,
+                vibrance: 0.4,
+                hsl: hsl_bands(&[
+                    (5, 0.0, -0.25, 0.0),
+                    (0, 0.1, -0.1, 0.0),
+                ]),
+                grain: 0.25,
+                grain_size: 0.0,
+                color_chrome_blue: 0.5,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Fujichrome Slide" (X-Trans II): Provia, H -1 / S +2,
+        // Color +2, EC +1/3..+1. "A good deal of contrast, vibrant colors —
+        // a non-Velvia reversal-film vibe"; warm per the described examples.
+        builtin(
+            "Retro Slide",
+            Adjustments {
+                exposure: 0.3,
+                contrast: 0.2,
+                temperature: 0.05,
+                tint: 0.05,
+                highlights: -0.3,
+                shadows: -0.4,
+                vibrance: 0.3,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Kodak Royal Gold 400": Classic Neg, Shade +3R/+5B,
+        // Color +4, H -1 / S +1, grain Strong/Small, CC Strong, CCB Strong,
+        // EC +1/3..+2/3. 90s "memory color": warm, magenta-leaning, vivid reds.
+        builtin(
+            "Memory Gold",
+            Adjustments {
+                exposure: 0.3,
+                contrast: 0.2,
+                temperature: 0.33,
+                tint: 0.12,
+                highlights: -0.3,
+                shadows: -0.3,
+                saturation: -0.15,
+                vibrance: 0.35,
+                curve: vec![
+                    CurvePoint { x: 0.0, y: 0.03 },
+                    CurvePoint { x: 1.0, y: 0.97 },
+                ],
+                hsl: hsl_bands(&[
+                    (0, 0.0, 0.15, 0.0),     // the "very vibrant reds"
+                    (3, -0.2, -0.15, 0.0),
+                ]),
+                grain: 0.5,
+                grain_size: 0.0,
+                color_chrome: 1.0,
+                color_chrome_blue: 1.0,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Preet / Bright Summer": Classic Chrome, 7100K
+        // -4R/-2B, Color +4, H -2 / S -2, CC Strong, EC +1..+2. "Bright,
+        // low-contrast, vibrant with a warm yellow-ish cast" — hazy summer.
+        builtin(
+            "Golden Haze",
+            Adjustments {
+                exposure: 0.8,
+                contrast: -0.1,
+                temperature: 0.25,
+                tint: -0.15,
+                highlights: -0.6,
+                shadows: 0.6,
+                saturation: -0.25,
+                vibrance: 0.4,
+                color_chrome: 1.0,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Retro Gold Low Contrast": Classic Chrome, Fluor 3
+        // +4R/-6B, Color +4, S -2 (lifted), grain Weak/Small, CC Strong,
+        // CCB Strong. Warm golden negative for harsh light — soft, nostalgic.
+        builtin(
+            "Soft Gold",
+            Adjustments {
+                temperature: 0.12,
+                tint: 0.05,
+                shadows: 0.6,
+                saturation: -0.25,
+                vibrance: 0.4,
+                hsl: hsl_bands(&[
+                    (5, 0.0, -0.25, 0.0),
+                    (0, 0.1, -0.1, 0.0),
+                ]),
+                grain: 0.25,
+                grain_size: 0.0,
+                color_chrome: 1.0,
+                color_chrome_blue: 1.0,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Bright Kodak": Classic Chrome, Daylight +3R/-7B,
+        // Color +4, H -2 / S -2, grain Strong/Large, EC +1..+1 2/3.
+        // "Generic overexposed Kodak negative, perhaps Portra-like" — bright,
+        // warm, soft, grainy.
+        builtin(
+            "Sunlit Negative",
+            Adjustments {
+                exposure: 0.8,
+                temperature: 0.33,
+                tint: -0.1,
+                highlights: -0.6,
+                shadows: 0.6,
+                saturation: -0.25,
+                vibrance: 0.4,
+                hsl: hsl_bands(&[
+                    (5, 0.0, -0.25, 0.0),
+                    (0, 0.1, -0.1, 0.0),
+                ]),
+                grain: 0.5,
+                grain_size: 0.75,
+                ..Default::default()
+            },
+        ),
+        // Fuji X Weekly "Ektachrome E100GX" (X-Trans III): Classic Chrome,
+        // H -2 / S +2, Color +4, grain Weak, EC +1/3..+1. "Vibrant saturation,
+        // a warm color cast, and fine grain" — warm balanced slide.
+        builtin(
+            "Warm Slide 100",
+            Adjustments {
+                exposure: 0.4,
+                contrast: 0.1,
+                temperature: 0.1,
+                tint: 0.05,
+                highlights: -0.6,
+                shadows: -0.6,
+                saturation: -0.25,
+                vibrance: 0.4,
+                hsl: hsl_bands(&[
+                    (5, 0.0, -0.25, 0.0),
+                    (0, 0.1, -0.1, 0.0),
+                ]),
+                grain: 0.25,
+                grain_size: 0.0,
+                ..Default::default()
+            },
+        ),
     ]
 }
 

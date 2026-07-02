@@ -859,6 +859,8 @@ export function App() {
           onApply={applyPreset}
           applyCount={selectedIds.size}
           canApply={!!selected && !showOriginal}
+          currentPreview={preview}
+          currentLabel={selected?.fileName ?? null}
           onClose={() => setManagerOpen(false)}
         />
       )}

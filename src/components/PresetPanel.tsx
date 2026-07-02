@@ -158,7 +158,7 @@ export function PresetPanel({
           Save current as preset…
         </button>
       )}
-      <button className="btn presets__save-btn" onClick={onOpenManager}>
+      <button className="btn presets__save-btn presets__manage-btn" onClick={onOpenManager}>
         Manage presets…
       </button>
     </div>

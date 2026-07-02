@@ -85,11 +85,12 @@ All fields are f32; UI shows ×100. Clamp everything to its documented range.
 | Color (−4…+4) | `vibrance` | `0.1 × Color`, **on top of** the base sim's saturation offset |
 | WB shift (R, B each −9…+9) | `temperature`, `tint` | `temperature = (R − B) / 30`; `tint = (R + B) / 40` (+ = magenta, − = green). Check: +2R/−4B → temp 0.2, tint −0.05 ✓ |
 | WB Kelvin (vs ~5500K daylight) | `temperature` | `(K − 5500) / 5000`, added before the shift mapping |
+| WB preset | `temperature`, `tint` | Daylight 0/0 · Shade +0.4/0 · Fluorescent 1 (daylight fl.) +0.2/+0.1 · Fluorescent 2 (warm white) −0.4/+0.1 · Fluorescent 3 (cool white) −0.26/+0.1 · Auto ≈ 0/0. Added before the shift mapping. (Preset K vs 5500K daylight: lower-K preset → cooler render.) |
 | Grain Effect strength | `grain` | Off 0 · Weak 0.25 · Strong 0.5 |
 | Grain Effect size | `grainSize` | Small 0.0 · Large 0.75 |
 | Color Chrome Effect | `colorChrome` | Off 0 · Weak 0.5 · Strong 1.0 |
 | Color Chrome FX Blue | `colorChromeBlue` | Off 0 · Weak 0.5 · Strong 1.0 |
-| Exposure compensation | — | Shooting guidance, not develop — skip by default; mention it in the report |
+| Exposure compensation | `exposure` (conditionally) | Skip by default (shooting guidance). **Include** a partial lift (≈ 0.4–0.6 × the EC midpoint, in EV) when the recipe is explicitly a bright/high-key/overexposed look (e.g. "EC +1 to +2" with Highlight −2) — there the brightness IS the look, and without it the preset reads flat-dim. Say so in the report |
 | NR / Sharpening / Clarity / DR / ISO | — | **No counterpart ops.** List as ignored |
 
 ## Base film-simulation starting points
@@ -112,9 +113,16 @@ green 3, aqua 4, blue 5, purple 6, magenta 7 (`hsl_bands` helper in presets.rs).
 | Acros | saturation −1.0, contrast +0.15, grain 0.2/size 0.2 (Acros's built-in grain) |
 | Monochrome | saturation −1.0 |
 
-Acros/Monochrome color filters (+Ye/+R/+G) have no true counterpart (our
-desaturation runs after HSL lum shifts, which still act on hue — approximate
-with HSL `lum` on the filtered bands *before* the −1 saturation, and say so).
+Acros/Monochrome color filters (+Ye/+R/+G) **cannot be emulated**: in our
+pipeline HSL runs AFTER saturation/vibrance, so once `saturation: -1.0` has
+collapsed the pixel to grey the HSL luminance shifts see zero saturation and
+do nothing. List the filter as dropped; approximate only the tonal character
+(contrast / highlights / shadows / grain).
+
+When the mechanical WB math and the recipe's *described* look disagree
+(fluorescent-preset approximations are rough), **the described look wins** —
+set temperature/tint by the prose ("warm color cast", "leans green/yellow")
+and note the deviation in the report.
 
 ## User-preset JSON format
 

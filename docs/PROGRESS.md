@@ -116,6 +116,39 @@ rest of session 6.
 
 ---
 
+## 2026-07-02 (session 6, continued) — 17 recipe translations + manager UX round 2
+
+**Recipe deep dive (35 built-ins total).** User supplied 5 inline recipes +
+12 Fuji X Weekly URLs; each was fetched, its settings and described aesthetic
+captured, and translated via the skill (non-infringing names, source cited in
+a comment per preset): Daily Neg / Mellow Neg / Rainy Day (the IG Classic Neg
+trio), City Positive (Ricoh GR III Royal Supra), Snow Chrome, Daylight Cine
+I+II (CineStill 400D v1/v2), Tungsten Cine (800T), Soft Mono 100 (T-Max soft),
+Classic Mono 125 (FP4+), Desert Punch (Vibrant Arizona), Retro Slide
+(Fujichrome Slide), Memory Gold (Royal Gold 400), Golden Haze (Preet/Bright
+Summer), Soft Gold (Retro Gold LC), Sunlit Negative (Bright Kodak), Warm
+Slide 100 (E100GX). All pass the whites floor. Fidelity note: translations
+derive from each recipe's settings + the page's textual description of its
+example images (WebFetch is text-only); the manager's benchmark tiles are the
+tool for eyeballing against the source pages.
+
+**Skill learnings folded back in:** WB-preset mapping table (Shade/Fluor 1–3),
+the conditional-exposure rule for bright/high-key recipes (EC is the look),
+described-look-wins-over-WB-math, and a FIX: mono color filters (+Ye/+R) are
+impossible in our pipeline (HSL runs after the −1.0 saturation collapse) —
+the earlier skill note suggesting an HSL workaround was wrong.
+
+**Manager UX round 2:** examples are a uniform tile grid; two new CC0
+benchmark landscapes (lush rainforest waterfall + snowy Himalayan range,
+pd.w.org via Openverse — see public/benchmark/README.md); an Examples / Your
+photo source toggle renders any preset on the currently selected photo's
+developed preview (same GL path); padding between Save-current and
+Manage-presets buttons. `decodeU16` extracted to `src/lib/pixels.ts`.
+
+55 Rust tests + `npm run build` pass. Pending in-app verification.
+
+---
+
 ## 2026-07-02 (session 5, wrap-up) — app-verified, tagged v0.3.0
 
 **Human verification passed.** The user ran the app with Fuji RAFs and Sony

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PreviewRenderer } from "../gl/PreviewRenderer";
 import { CropOverlay } from "./CropOverlay";
+import { decodeU16 } from "../lib/pixels";
 import type { PreviewPayload } from "../lib/ipc";
 import {
   STRAIGHTEN_RANGE,
@@ -38,13 +39,6 @@ const MAX_NATIVE_ZOOM = 8;
 /** Wheel sensitivity: one notch (deltaY ≈ 100) ≈ ×1.2. */
 const WHEEL_ZOOM_RATE = 0.0018;
 
-/** Decode base64 little-endian u16 pixel data into a Uint16Array (LE targets). */
-function decodeU16(b64: string): Uint16Array {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Uint16Array(bytes.buffer);
-}
 
 /** WebGL live preview. Re-renders on adjustment change without re-decoding. */
 export function Preview({

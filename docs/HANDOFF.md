@@ -21,14 +21,18 @@ UX + **Phase 4 crop/straighten**, all **needing in-app verification**)
   undoable), custom thumbnail context menu (Reset / Copy-Paste adjustments /
   Rotate / Show in Explorer via `reveal_in_file_manager`), webview default
   menu suppressed. Batch writes funnel through `applyToPhotos`.
-- **Preset favorites + manager (18 built-ins):** the inspector panel lists
+- **Preset favorites + manager (35 built-ins):** the inspector panel lists
   only ★ favorites (persisted in `<app-data>/preset-favorites.json`,
   seeded from `default_favorites()`); "Manage presets…" opens a modal with
-  every preset, star toggles, and live benchmark previews — bundled Kodak
-  kodim test images (`public/benchmark/`) rendered through the real
-  `PreviewRenderer`, so examples are the true pipeline output. Presets are
-  geometry-free by construction now (stripped at save; apply preserves the
-  target's geometry).
+  every preset, star toggles, and live preview tiles — 5 bundled benchmarks
+  (Kodak kodim ×3 + CC0 rainforest + snowy range, `public/benchmark/`) plus
+  an **Examples / Your photo toggle** that renders presets on the selected
+  photo's developed preview, all through the real `PreviewRenderer`. Presets
+  are geometry-free by construction (stripped at save; apply preserves the
+  target's geometry). 17 of the built-ins are cited recipe translations
+  (source + settings in comments in presets.rs) — translated from settings +
+  described example images; verify look fidelity by eye against the source
+  pages using the benchmark tiles.
 On top of the verified `v0.3.0`:
 - **Effects (new, session 6):** four Fuji-style `Adjustments` fields —
   `grain`/`grain_size` (film grain: monochrome midtone-masked luminance noise,

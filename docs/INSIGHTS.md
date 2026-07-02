@@ -16,6 +16,19 @@ in [../CLAUDE.md](../CLAUDE.md).)
   Build Tools** (the linker — installed via VS 2022 Build Tools, `VCTools`
   workload), and the **WebView2 runtime** (already present on Win11). rustc finds
   `link.exe` automatically via the VS registry once Build Tools are installed.
+- **Stale SMB locks on the NAS can brick `tauri dev` for hours.** A killed dev
+  run leaves the NAS holding open handles on whatever it had loaded — seen on
+  `tauri-dev.log` AND the native `.node` modules (`@tauri-apps/cli-*`,
+  `@rollup/rollup-*`), which then fail with "being used by another process" /
+  EBUSY even though NO local process holds them (the handles belong to the Task
+  Scheduler batch-logon's *own* SMB session, so `net use Z: /delete` on the
+  interactive session doesn't clear them). Diagnosis: `head -c` the file — EBUSY
+  with zero owning processes = stale NAS handle. **Recovery that works: rename
+  the locked package dir aside (renames succeed even when reads fail) and
+  `npm i` to lay down fresh files.** Prevention baked into `run-dev.cmd`: logs
+  go to local `%TEMP%`, and it runs Vite + `cargo run` directly instead of the
+  npm Tauri CLI (debug builds embed `devUrl` themselves), so a future kill has
+  almost nothing on the share to poison.
 
 ## Raw decode (rawler 0.7.2)
 

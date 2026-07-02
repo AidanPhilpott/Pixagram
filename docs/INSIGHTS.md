@@ -142,6 +142,16 @@ in [../CLAUDE.md](../CLAUDE.md).)
   WYSIWYG guarantee — keep it when adding ops.
 - Previews are downscaled (longest edge 2048px) **in Rust before IPC**; thumbnails
   to 384px. Never send a full 40MP buffer across the bridge.
+- **Grain is the one deliberate WYSIWYG relaxation.** It's spatial (needs pixel
+  coordinates), so it lives OUTSIDE `apply_pixel` as a lockstep pair — Rust
+  `adjustments::apply_grain` (exporter calls it per pixel after `apply_pixel`)
+  and the grain block at the end of the fragment shader. The preview computes
+  grain on the *preview-resolution* pixel grid, so it matches the export in
+  character, not pixel-for-pixel (grain is stochastic; nothing else is allowed
+  this). The cell hash is Dave Hoskins' `hash12` — chosen specifically because
+  it uses only fract/dot/mul (**no `sin`**): GPU `sin` of large arguments is
+  driver-dependent garbage and can't be reproduced in Rust f32, whereas the
+  fract-based hash computes near-identically on both sides.
 
 ## Frontend / UI
 

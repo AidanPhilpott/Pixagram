@@ -7,6 +7,31 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-07-02 (session 6) — Fuji-style effects (grain, color chrome) + styled preset library
+
+User redirect (Phase 4 deferred): grow presets into a library of styled looks,
+modeled on Fuji film-sim recipes — specifically Fuji X Weekly's "Reggie's
+Portra" (Classic Chrome, H-1 S-1 Color+2, Grain Weak/Small, CC Strong, CCB
+Weak, WB +2R/-4B) — with granular Fuji-style effect controls.
+
+- **Four new `Adjustments` fields** (all `#[serde(default)]`, ts-rs regen'd):
+  `color_chrome` + `color_chrome_blue` (saturation-proportional darken+densify,
+  blue-weighted variant; pipeline step 10 after HSL, mirrored in the shader) and
+  `grain` + `grain_size` (monochrome luminance noise, midtone-masked, 1–3px
+  cells). Grain is spatial → new lockstep pair `apply_grain` ↔ shader grain
+  block, sin-free hash for cross-language reproducibility (see INSIGHTS).
+  Constants: CC_LUM 0.12 / CC_SAT 0.10 / GRAIN 0.15 — tunable, must match GLSL.
+- **UI:** new collapsible "Effects" inspector section — Grain, Grain Size,
+  Color Chrome, Color Chrome Blue sliders ([0,100], no-sign readout).
+- **Presets:** 7 new built-ins (11 total): **Classic Portrait** (the
+  Portra-400-style recipe translation, non-infringing name), Vivid Slide,
+  Muted Chrome, Golden Hour, Cinema Teal, Faded Matte, Grainy Mono.
+  Recipe's NR/Sharpening/Clarity/DR have no counterpart ops yet.
+- 47 Rust tests (5 new: color chrome ×2, grain ×3) + `npm run build` pass.
+  Not yet human-verified in-app.
+
+---
+
 ## 2026-07-02 (session 5, wrap-up) — app-verified, tagged v0.3.0
 
 **Human verification passed.** The user ran the app with Fuji RAFs and Sony

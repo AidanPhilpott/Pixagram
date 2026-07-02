@@ -5,13 +5,29 @@
 > dated entry to [PROGRESS.md](PROGRESS.md) for the running history, and add any
 > durable gotchas to [INSIGHTS.md](INSIGHTS.md).
 
-**Last updated:** 2026-07-02 (session 5 — multi-agent batch, consolidated,
-**human-verified**)
-**Current phase:** Phase 3 (Presets) — **COMPLETE, APP-VERIFIED, tagged
-`v0.3.0`.** The user ran the app with Fuji RAFs and Sony A7II ARWs loaded
-side-by-side: batch import of both formats, presets (apply/save/batch), zoom,
-rotate, view-original, and undo/redo all confirmed working. Landed as 4
-feature commits (`51dae30`…`c015c8e`) plus launcher hardening:
+**Last updated:** 2026-07-02 (session 6 — Fuji-style effects + styled preset
+library, **needs in-app verification**)
+**Current phase:** Phase 3+ (presets extension, user-requested). On top of the
+verified `v0.3.0`:
+- **Effects (new, session 6):** four Fuji-style `Adjustments` fields —
+  `grain`/`grain_size` (film grain: monochrome midtone-masked luminance noise,
+  1–3px cells; **spatial**, so it's a new lockstep pair `apply_grain` ↔ the
+  shader's grain block, NOT in `apply_pixel`; sin-free hash, see INSIGHTS) and
+  `color_chrome`/`color_chrome_blue` (Fuji Color Chrome emulation: darken +
+  densify ∝ pixel saturation, blue-weighted variant; pipeline step 10 after
+  HSL, in `apply_pixel` + shader). New "Effects" inspector section. The Phase 5
+  exporter MUST call `apply_grain(x, y)` after `apply_pixel` (doc'd in
+  export.rs).
+- **Preset library (session 6):** 7 new built-ins (11 total). Headliner
+  **"Classic Portrait"** = Fuji X Weekly "Reggie's Portra" recipe translated
+  into our vocabulary (Classic Chrome / H-1 / S-1 / Color+2 / Grain Weak-Small /
+  CC Strong / CCB Weak / WB +2R−4B), plus Vivid Slide, Muted Chrome, Golden
+  Hour, Cinema Teal, Faded Matte, Grainy Mono. The recipe's NR / Sharpening /
+  Clarity / DR-Auto have **no counterpart ops yet** — candidates for a future
+  session if the user wants closer emulation.
+
+Session-5 state (all human-verified, tagged `v0.3.0`), landed as 4 feature
+commits (`51dae30`…`c015c8e`) plus launcher hardening:
 - **Presets (Phase 3, model A):** JSON store under `<app-data>/presets/` with
   list/save/delete/rename commands, 4 built-ins, `PresetPanel` in the
   inspector, Ctrl/Shift grid multi-select + batch apply.
@@ -32,8 +48,8 @@ feature commits (`51dae30`…`c015c8e`) plus launcher hardening:
   real Sony A7II ARWs, which exposed + fixed a latent demosaic edge overflow
   (see INSIGHTS "Raw decode").
 
-42 Rust tests + `npm run build` pass. ts-rs types regenerated (now include
-`rotation` and `Preset`).
+47 Rust tests + `npm run build` pass. ts-rs types regenerated (now include the
+four effect fields).
 **Branch:** `master` (local-only, no remote) · **Last tag:** `v0.3.0`
 
 > **Color-profile / "Fuji recipe" feature → SHIPPED as Phase 3 presets, model
@@ -44,7 +60,11 @@ feature commits (`51dae30`…`c015c8e`) plus launcher hardening:
 
 ## ⚠️ START HERE NEXT SESSION
 
-Phase 3 is verified and tagged. Remaining phase work, in order:
+**First: human-verify session 6** (effects + preset library) in the app —
+grain looks like film (not static) at Weak/Small and Strong/Large, color
+chrome deepens saturated reds/blues without touching greys, "Classic
+Portrait" flatters skin on a real portrait RAF, all 11 built-ins listed and
+applying. Then continue the phase order:
 1. **Phase 4 leftovers: crop + free straighten** (90° rotate is done and
    persists). Both are geometry like rotation — follow its pattern: field(s)
    on `Adjustments` (`#[serde(default)]` + ts-rs), GPU-side geometry in

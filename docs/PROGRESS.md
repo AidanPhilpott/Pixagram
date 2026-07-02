@@ -168,6 +168,12 @@ tight uniform grid (6px gap, 3:2 center-cropped via canvas object-fit,
 captions overlay the tile corner); user presets can be deleted from the
 manager (×, selection falls back when the previewed one dies).
 
+**Round 2 (same day):** grain cell range compressed `1.5+2·size` →
+`1.25+1.25·size` (max clump 3.5px → 2.5px; user confirmed smaller sizes read
+much better — big soft clumps mottle at preview scale). Fixed the ballooned
+Apply button in the manager: leftover `flex-basis: 100%` in the now-column
+flex pane meant 100% HEIGHT.
+
 **Active-preset indicator:** the panel highlights (accent + ✓) the preset the
 photo's stack currently equals. Derived via `sameLook` (look fields only,
 geometry ignored — matching apply semantics), so any edit dirties it to

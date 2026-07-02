@@ -494,7 +494,9 @@ fn hash_cell(x: f32, y: f32) -> f32 {
 /// four surrounding grain-cell hashes are bilinearly blended (Hermite-eased),
 /// so grain reads as soft, roundish clumps rather than hard square blocks —
 /// nearest-cell quantization was visibly "square" (user report). Cell size is
-/// `1.5 + 2·grain_size` px; a midtone mask keeps pure black/white clean.
+/// `1.25 + 1.25·grain_size` px (range compressed from a 3.5px max after a
+/// second user pass — big soft clumps read as mottling at preview scale);
+/// a midtone mask keeps pure black/white clean.
 /// **Mirror of the grain block at the end of the GLSL shader's `main()` — edit
 /// both together.** Preview grain is computed at preview resolution, so it
 /// matches the export in character, not per-pixel.
@@ -503,7 +505,7 @@ pub fn apply_grain(rgb: [f32; 3], x: u32, y: u32, adj: &Adjustments) -> [f32; 3]
     if adj.grain <= 0.0 {
         return rgb;
     }
-    let cell = 1.5 + 2.0 * adj.grain_size.clamp(0.0, 1.0);
+    let cell = 1.25 + 1.25 * adj.grain_size.clamp(0.0, 1.0);
     let px = x as f32 / cell;
     let py = y as f32 / cell;
     let (ix, iy) = (px.floor(), py.floor());

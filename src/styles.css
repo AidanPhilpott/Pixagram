@@ -440,8 +440,11 @@ body {
   background: rgba(220, 90, 90, 0.18);
   color: #e08585;
 }
+/* A normal-height button — in the column-flex preview pane a percentage
+   flex-basis would be HEIGHT and balloon the button (past bug). */
 .preset-manager__apply {
-  flex-basis: 100%;
+  flex: 0 0 auto;
+  align-self: flex-start;
   margin-top: 4px;
 }
 .preset-manager__empty {

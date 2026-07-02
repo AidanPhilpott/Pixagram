@@ -232,7 +232,7 @@ void main() {
   // Hermite easing) so grain is soft round clumps, not hard squares;
   // luminance-only, faded at pure black/white.
   if (uGrain > 0.0) {
-    float cell = 1.5 + 2.0 * clamp(uGrainSize, 0.0, 1.0);
+    float cell = 1.25 + 1.25 * clamp(uGrainSize, 0.0, 1.0);
     vec2 p = vUv * uTexSize / cell;
     vec2 i = floor(p);
     vec2 f = p - i;

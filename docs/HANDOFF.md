@@ -25,6 +25,11 @@ verified `v0.3.0`:
   Hour, Cinema Teal, Faded Matte, Grainy Mono. The recipe's NR / Sharpening /
   Clarity / DR-Auto have **no counterpart ops yet** — candidates for a future
   session if the user wants closer emulation.
+- **`/fuji-recipe-to-preset` skill (session 6):** repeatable recipe→preset
+  conversion — capture recipe (URL/pasted), non-infringing name, base-sim
+  starting point + per-setting formulas, deliver as user-preset JSON
+  (`%APPDATA%\com.pixagram.app\presets\`) or a built-in. See
+  `.claude/skills/fuji-recipe-to-preset/SKILL.md`.
 
 Session-5 state (all human-verified, tagged `v0.3.0`), landed as 4 feature
 commits (`51dae30`…`c015c8e`) plus launcher hardening:

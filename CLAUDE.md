@@ -52,9 +52,17 @@ Desktop-first (PC → macOS later). The authoritative brief is [README.md](READM
   whites/blacks, vibrance/saturation, per-hue HSL, point/spline tone curve), live GPU
   preview == export, on a 16-bit float preview. TS types are ts-rs-generated from the
   Rust structs (`npm run gen:types`).
-- **Phase 3 (presets / color profiles): next.** Save/apply/manage adjustment stacks
-  as JSON — the day-one "Fuji recipe" feature. See docs/HANDOFF.md.
+- **Phase 3 (presets / color profiles): done, tagged `v0.3.0`, app-verified.**
+  JSON preset store + built-ins + batch apply, plus undo/redo, zoom/pan,
+  rotation, persistence, multi-format RAW. Session 6 extended it with
+  Fuji-style effects (grain, color chrome) and a styled built-in library.
+- **Next: Phase 4 leftovers (crop + straighten), then Phase 5 export.**
+  See docs/HANDOFF.md.
 
 ## Conventions
 - Git from commit one; conventional commits; tag releases per phase (`v0.1.0`, …).
 - Pin deps; commit lockfiles (`Cargo.lock`, `package-lock.json`).
+- **`/fuji-recipe-to-preset` skill** (`.claude/skills/`): converts a Fuji
+  film-sim recipe (URL or pasted settings) into a Pixagram preset — mapping
+  tables + base-sim starting points live in the skill; the worked example is
+  the "Classic Portrait" built-in.

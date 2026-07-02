@@ -98,9 +98,9 @@ export function CurveEditor({ points, disabled, onChange }: CurveEditorProps) {
 
   return (
     <div className={`curve${disabled ? " curve--disabled" : ""}`}>
-      <div className="curve__head">
-        <label>Tone Curve</label>
-        {!isIdentity(points) && (
+      {/* The collapsible section header carries the title; this row hosts Reset. */}
+      {!isIdentity(points) && (
+        <div className="curve__head">
           <button
             className="control__reset"
             onClick={() => onChange(identityCurve())}
@@ -109,8 +109,8 @@ export function CurveEditor({ points, disabled, onChange }: CurveEditorProps) {
           >
             Reset
           </button>
-        )}
-      </div>
+        </div>
+      )}
       <svg
         ref={svgRef}
         className="curve__canvas"

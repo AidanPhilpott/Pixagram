@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ThumbnailGrid } from "./components/ThumbnailGrid";
 import { Preview } from "./components/Preview";
 import { AdjustmentSlider } from "./components/AdjustmentSlider";
+import { CollapsibleSection } from "./components/CollapsibleSection";
 import { HslPanel } from "./components/HslPanel";
 import { CurveEditor } from "./components/CurveEditor";
 import {
@@ -61,23 +62,25 @@ type ScalarField = {
   [K in keyof Adjustments]: Adjustments[K] extends number ? K : never;
 }[keyof Adjustments];
 
-/** Inspector slider rows, in display order. One row per scalar `Adjustments` field. */
+/** Inspector slider rows, in display order. One row per scalar `Adjustments`
+ *  field; `group` places it in a collapsible inspector section. */
 const SLIDERS: ReadonlyArray<{
   field: ScalarField;
   label: string;
+  group: "light" | "color";
   range: { min: number; max: number; step: number };
   format: (v: number) => string;
 }> = [
-  { field: "exposure", label: "Exposure", range: EXPOSURE_RANGE, format: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)} EV` },
-  { field: "contrast", label: "Contrast", range: CONTRAST_RANGE, format: asPercent },
-  { field: "temperature", label: "Temperature", range: WB_RANGE, format: asPercent },
-  { field: "tint", label: "Tint", range: WB_RANGE, format: asPercent },
-  { field: "highlights", label: "Highlights", range: TONE_RANGE, format: asPercent },
-  { field: "shadows", label: "Shadows", range: TONE_RANGE, format: asPercent },
-  { field: "whites", label: "Whites", range: TONE_RANGE, format: asPercent },
-  { field: "blacks", label: "Blacks", range: TONE_RANGE, format: asPercent },
-  { field: "vibrance", label: "Vibrance", range: COLOR_RANGE, format: asPercent },
-  { field: "saturation", label: "Saturation", range: COLOR_RANGE, format: asPercent },
+  { field: "exposure", label: "Exposure", group: "light", range: EXPOSURE_RANGE, format: (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)} EV` },
+  { field: "contrast", label: "Contrast", group: "light", range: CONTRAST_RANGE, format: asPercent },
+  { field: "highlights", label: "Highlights", group: "light", range: TONE_RANGE, format: asPercent },
+  { field: "shadows", label: "Shadows", group: "light", range: TONE_RANGE, format: asPercent },
+  { field: "whites", label: "Whites", group: "light", range: TONE_RANGE, format: asPercent },
+  { field: "blacks", label: "Blacks", group: "light", range: TONE_RANGE, format: asPercent },
+  { field: "temperature", label: "Temperature", group: "color", range: WB_RANGE, format: asPercent },
+  { field: "tint", label: "Tint", group: "color", range: WB_RANGE, format: asPercent },
+  { field: "vibrance", label: "Vibrance", group: "color", range: COLOR_RANGE, format: asPercent },
+  { field: "saturation", label: "Saturation", group: "color", range: COLOR_RANGE, format: asPercent },
 ];
 
 export function App() {
@@ -278,6 +281,23 @@ export function App() {
     }
   }, [selected, adjustments]);
 
+  // One inspector row per SLIDERS entry (shared by the Light/Color sections).
+  const sliderRow = (s: (typeof SLIDERS)[number]) => (
+    <AdjustmentSlider
+      key={s.field}
+      id={s.field}
+      label={s.label}
+      value={adjustments[s.field]}
+      min={s.range.min}
+      max={s.range.max}
+      step={s.range.step}
+      defaultValue={0}
+      disabled={!selected || showOriginal}
+      onChange={(v) => updateField(s.field, v)}
+      format={s.format}
+    />
+  );
+
   return (
     <div className="app">
       <header className="topbar">
@@ -333,31 +353,26 @@ export function App() {
               Original
             </button>
           </div>
-          {SLIDERS.map((s) => (
-            <AdjustmentSlider
-              key={s.field}
-              id={s.field}
-              label={s.label}
-              value={adjustments[s.field]}
-              min={s.range.min}
-              max={s.range.max}
-              step={s.range.step}
-              defaultValue={0}
+          <CollapsibleSection id="light" title="Light" defaultOpen>
+            {SLIDERS.filter((s) => s.group === "light").map(sliderRow)}
+          </CollapsibleSection>
+          <CollapsibleSection id="color" title="Color">
+            {SLIDERS.filter((s) => s.group === "color").map(sliderRow)}
+          </CollapsibleSection>
+          <CollapsibleSection id="curve" title="Tone Curve">
+            <CurveEditor
+              points={adjustments.curve}
               disabled={!selected || showOriginal}
-              onChange={(v) => updateField(s.field, v)}
-              format={s.format}
+              onChange={updateCurve}
             />
-          ))}
-          <CurveEditor
-            points={adjustments.curve}
-            disabled={!selected || showOriginal}
-            onChange={updateCurve}
-          />
-          <HslPanel
-            bands={adjustments.hsl}
-            disabled={!selected || showOriginal}
-            onChange={updateHslBand}
-          />
+          </CollapsibleSection>
+          <CollapsibleSection id="hsl" title="HSL">
+            <HslPanel
+              bands={adjustments.hsl}
+              disabled={!selected || showOriginal}
+              onChange={updateHslBand}
+            />
+          </CollapsibleSection>
           {status && <div className="inspector__status">{status}</div>}
         </aside>
       </main>

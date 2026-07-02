@@ -27,9 +27,7 @@ export function HslPanel({ bands, disabled, onChange }: HslPanelProps) {
 
   return (
     <div className="hsl">
-      <div className="hsl__head">
-        <label>HSL / Color</label>
-      </div>
+      {/* The collapsible section header carries the title. */}
       <div className="hsl__swatches" role="tablist" aria-label="HSL color band">
         {HSL_BANDS.map((b, i) => (
           <button

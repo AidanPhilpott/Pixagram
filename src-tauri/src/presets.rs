@@ -86,19 +86,24 @@ pub fn builtin_presets() -> Vec<Preset> {
             },
         ),
         // Faded-film look: soft contrast, recovered highlights, lifted shadows,
-        // muted color, a touch of warmth, and a gently faded tone curve.
+        // muted color, warmth, fine grain. Flattening ops COMPOUND (see the
+        // "flat/milky" guard in .claude/skills/fuji-recipe-to-preset): keep the
+        // stack gentle and the curve ceiling near 1.0 so whites stay white —
+        // a 0.95 input must stay ≥ ~0.88.
         builtin(
             "Soft Film",
             Adjustments {
-                contrast: -0.15,
-                highlights: -0.3,
-                shadows: 0.25,
-                saturation: -0.2,
+                contrast: -0.1,
+                highlights: -0.2,
+                shadows: 0.15,
+                saturation: -0.15,
                 temperature: 0.08,
                 curve: vec![
-                    CurvePoint { x: 0.0, y: 0.04 },
-                    CurvePoint { x: 1.0, y: 0.97 },
+                    CurvePoint { x: 0.0, y: 0.03 },
+                    CurvePoint { x: 1.0, y: 0.99 },
                 ],
+                grain: 0.2,
+                grain_size: 0.25,
                 ..Default::default()
             },
         ),
@@ -121,18 +126,22 @@ pub fn builtin_presets() -> Vec<Preset> {
         // yellow); Color +2 over Chrome's muted base → vibrance up, saturation
         // a touch down; muted yellow-leaning greens + subdued blues via HSL.
         // (NR -4 / Sharpening -2 / DR-Auto have no counterpart ops yet.)
+        // Highlight -1 maps ONCE (the highlights slider); the curve only adds a
+        // gentle black toe with the ceiling at 1.0 — highlight softening plus a
+        // faded ceiling would compound into milky whites (see the skill's
+        // flat/milky guard).
         builtin(
             "Classic Portrait",
             Adjustments {
                 temperature: 0.2,
                 tint: -0.05,
-                highlights: -0.35,
+                highlights: -0.3,
                 shadows: 0.3,
                 vibrance: 0.2,
                 saturation: -0.05,
                 curve: vec![
-                    CurvePoint { x: 0.0, y: 0.03 },
-                    CurvePoint { x: 1.0, y: 0.98 },
+                    CurvePoint { x: 0.0, y: 0.02 },
+                    CurvePoint { x: 1.0, y: 1.0 },
                 ],
                 hsl: hsl_bands(&[
                     (1, 0.0, -0.05, 0.05),   // orange: flatter, brighter skin
@@ -428,6 +437,25 @@ mod tests {
         let saved = all.iter().find(|p| p.name == "My Look").expect("listed");
         assert!(!saved.builtin);
         assert_eq!(saved.adjustments, adj, "adjustments must survive the disk round-trip");
+    }
+
+    #[test]
+    fn builtins_keep_whites_bright() {
+        // Guard against compounding flatteners (negative contrast + highlight
+        // recovery + fade curve stack multiplicatively — the original "Soft
+        // Film" pushed a 0.95 white down to ~0.84, which reads as milky/flat).
+        // Every built-in, including deliberately matte looks, must keep a
+        // near-white pixel at or above this floor. Mirrors the flat/milky
+        // guard documented in .claude/skills/fuji-recipe-to-preset.
+        for p in builtin_presets() {
+            let out = crate::adjustments::apply_pixel(&p.adjustments, [0.95; 3]);
+            let max = out[0].max(out[1]).max(out[2]);
+            assert!(
+                max >= 0.85,
+                "built-in \"{}\" crushes whites: 0.95 -> {max:.3} (flat/milky)",
+                p.name
+            );
+        }
     }
 
     #[test]

@@ -28,7 +28,21 @@ Weak, WB +2R/-4B) — with granular Fuji-style effect controls.
   Muted Chrome, Golden Hour, Cinema Teal, Faded Matte, Grainy Mono.
   Recipe's NR/Sharpening/Clarity/DR have no counterpart ops yet.
 - 47 Rust tests (5 new: color chrome ×2, grain ×3) + `npm run build` pass.
-  Not yet human-verified in-app.
+- **`/fuji-recipe-to-preset` skill** added (`.claude/skills/`): repeatable
+  recipe→preset conversion (mapping tables, base-sim starting points, JSON or
+  built-in delivery).
+- **User verification round:** (1) only 4 presets showed — stale Rust binary
+  (Vite hot-reloads the frontend into an old process; built-ins need a
+  relaunch/cargo rebuild). Not a bug; documented in the skill. (2) "Soft Film
+  makes the image fall completely flat" — REAL design defect: it stacked four
+  flatteners (neg. contrast + highlight recovery + shadow lift + fade-ceiling
+  curve); a 0.95 white landed at ~0.84 → milky. Retuned Soft Film (and Classic
+  Portrait, which double-mapped Highlight −1 into both slider AND curve
+  ceiling). Added `builtins_keep_whites_bright` test (0.95 white must stay
+  ≥ 0.85 through every built-in) + a mandatory "flat/milky guard" with a
+  white-point arithmetic check to the skill. Also hardened `cloneAdjustments`
+  to default-fill fields missing from stale-binary IPC payloads (undefined →
+  NaN uniforms). 48 Rust tests pass.
 
 ---
 

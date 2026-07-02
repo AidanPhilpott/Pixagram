@@ -107,9 +107,14 @@ const SLIDERS: ReadonlyArray<{
   { field: "colorChromeBlue", label: "Color Chrome Blue", group: "effects", range: EFFECT_RANGE, format: asAmount },
 ];
 
-/** Deep-copy a stack so an applied preset never aliases its arrays into a photo. */
+/** Deep-copy a stack so an applied preset never aliases its arrays into a photo.
+ *  Spreads over the neutral defaults first: adjustments that crossed IPC from a
+ *  binary older than a field (Rust adds fields with `#[serde(default)]`, but a
+ *  stale dev process serializes without them) would otherwise leave the new
+ *  fields `undefined` and feed NaN to the shader uniforms. */
 function cloneAdjustments(a: Adjustments): Adjustments {
   return {
+    ...defaultAdjustments(),
     ...a,
     hsl: a.hsl.map((b) => ({ ...b })),
     curve: a.curve.map((p) => ({ ...p })),

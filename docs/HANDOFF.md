@@ -53,8 +53,13 @@ commits (`51dae30`…`c015c8e`) plus launcher hardening:
   real Sony A7II ARWs, which exposed + fixed a latent demosaic edge overflow
   (see INSIGHTS "Raw decode").
 
-47 Rust tests + `npm run build` pass. ts-rs types regenerated (now include the
-four effect fields).
+48 Rust tests + `npm run build` pass. ts-rs types regenerated (now include the
+four effect fields). Post-verification fixes: Soft Film + Classic Portrait
+retuned (compounding flatteners made whites milky — see the flat/milky guard
+in the `/fuji-recipe-to-preset` skill and `builtins_keep_whites_bright`);
+`cloneAdjustments` default-fills fields missing from stale-binary IPC.
+**Built-ins live in the Rust binary — relaunch the dev app after changing
+them** (Vite hot-reload updates only the frontend).
 **Branch:** `master` (local-only, no remote) · **Last tag:** `v0.3.0`
 
 > **Color-profile / "Fuji recipe" feature → SHIPPED as Phase 3 presets, model

@@ -29,17 +29,50 @@ Weekly's "Reggie's Portra") — read both before translating.
 4. **Deliver** (ask the user which, if not obvious):
    - **User preset (default):** write one JSON file to
      `%APPDATA%\com.pixagram.app\presets\<Name>.json` (see format below).
-     The app lists presets from that directory — restart the app or trigger
-     any preset action to see it.
+     The app lists presets from that directory — restart the app to see it.
    - **Built-in:** add to `builtin_presets()` in `presets.rs` following the
      "Classic Portrait" pattern (comment documenting the source recipe and the
      mapping), then `cargo test --manifest-path src-tauri/Cargo.toml --lib`
-     and `npm run build`.
-5. **Report the mapping** — a short table of recipe setting → field value, and
+     and `npm run build`. **Built-ins live in the Rust binary: the running dev
+     app will NOT show them until it's relaunched** (`Start-ScheduledTask
+     -TaskName PixagramDev` rebuilds via `cargo run`; Vite hot-reloads only
+     the frontend, so new UI + old preset list = stale binary). Tell the user
+     this explicitly.
+5. **Run the flat/milky guard** (below) before delivering — the most common
+   translation failure mode is compounding flatteners into a dead image.
+6. **Report the mapping** — a short table of recipe setting → field value, and
    an explicit list of settings that were ignored (no counterpart ops yet:
    Noise Reduction, Sharpening, Clarity, Dynamic Range, ISO). Recommend the
    user fine-tune by eye on a real photo; these numbers are calibrated
    starting points, not colorimetric conversions.
+
+## Flat/milky guard (MANDATORY before delivering)
+
+Flattening operations **compound multiplicatively**: negative `contrast`,
+negative `highlights`, positive `shadows`, and a fade curve each look mild
+alone, but stacked they grey out every white. (The original "Soft Film"
+built-in stacked all four; a 0.95 white landed at ~0.84 and the whole image
+read as milky — a user bug report, and why this section exists. A Rust test,
+`builtins_keep_whites_bright`, now enforces the floor for built-ins.)
+
+Rules:
+- **Map each recipe control to exactly ONE mechanism.** Highlight −1 → the
+  `highlights` slider, done. Do NOT also lower the curve ceiling "for film
+  feel" — Fuji's Highlight/Shadow are subtle in-camera and the 0.3× mapping is
+  already generous.
+- **The curve ceiling stays at 1.0** unless the source film is explicitly
+  matte/faded (and the recipe or its description says so). A film "toe" is a
+  small black-end lift (floor ≤ 0.05); it does not require touching the top.
+- **White-point check (do the arithmetic):** trace a 0.95 near-white through
+  the pipeline —
+  `v += 0.2 × (highlights·w_hl + whites·w_wh)` with `w_hl = smoothstep(0.4,
+  0.9, v)`, `w_wh = smoothstep(0.6, 1.0, v)`; then the contrast mix
+  (`v + (0.5 + (v−0.5)·0.5 − v)·(−contrast)` for negative contrast); then the
+  curve. The result must stay **≥ 0.88** for a normal look, ≥ 0.85 for a
+  deliberately matte one. If it doesn't, remove a flattener — don't rescale
+  them all.
+- Sanity-apply on a real photo (or eyeball the numbers against a comparable
+  built-in) before calling the preset done.
 
 ## Recipe-setting → `Adjustments` mapping
 

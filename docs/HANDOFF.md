@@ -91,7 +91,9 @@ in the `/fuji-recipe-to-preset` skill and `builtins_keep_whites_bright`);
 `cloneAdjustments` default-fills fields missing from stale-binary IPC.
 **Built-ins live in the Rust binary — relaunch the dev app after changing
 them** (Vite hot-reload updates only the frontend).
-**Branch:** `master` (local-only, no remote) · **Last tag:** `v0.3.0`
+**Branch:** `master` · **Remote:** `origin` →
+[github.com/AidanPhilpott/Pixagram](https://github.com/AidanPhilpott/Pixagram)
+(private, pushed 2026-07-02, tags included) · **Last tag:** `v0.3.0`
 
 > **Color-profile / "Fuji recipe" feature → SHIPPED as Phase 3 presets, model
 > (A):** a preset is a named, editable `Adjustments` JSON bundle; a base

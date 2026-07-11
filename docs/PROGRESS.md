@@ -7,6 +7,18 @@ lives in [HANDOFF.md](HANDOFF.md); durable technical gotchas in
 
 ---
 
+## 2026-07-02 (session 6, continued) — pushed to GitHub
+
+Repo had been local-only (git from commit one, no remote) through Phases 1–4.
+Created a **private** GitHub repo (`gh repo create`, matching the visibility
+of the user's other repos) and pushed: `AidanPhilpott/Pixagram`. Pushed
+`master` plus all three tags (`v0.1.0`–`v0.3.0`) in one `git push -u origin
+master --tags`. Pre-push check: `.gitignore` already excludes
+node_modules/dist/target/logs/diagnostic-PNGs; no secrets or credentials in
+tracked files. HANDOFF's "Branch" line updated with the remote URL.
+
+---
+
 ## 2026-07-02 (session 6) — Fuji-style effects (grain, color chrome) + styled preset library
 
 User redirect (Phase 4 deferred): grow presets into a library of styled looks,

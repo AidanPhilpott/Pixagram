@@ -93,7 +93,8 @@ in the `/fuji-recipe-to-preset` skill and `builtins_keep_whites_bright`);
 them** (Vite hot-reload updates only the frontend).
 **Branch:** `master` · **Remote:** `origin` →
 [github.com/AidanPhilpott/Pixagram](https://github.com/AidanPhilpott/Pixagram)
-(private, pushed 2026-07-02, tags included) · **Last tag:** `v0.3.0`
+(public as of 2026-11-20, all rights reserved: intentionally no license;
+tags included) · **Last tag:** `v0.3.0`
 
 > **Color-profile / "Fuji recipe" feature → SHIPPED as Phase 3 presets, model
 > (A):** a preset is a named, editable `Adjustments` JSON bundle; a base
